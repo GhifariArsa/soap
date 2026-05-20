@@ -1,3 +1,4 @@
-# mize
+# Soap
 
-_Created 2026-05-20_
+The Simple Organisation App built with Python
+

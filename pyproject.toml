@@ -1,0 +1,11 @@
+[project]
+name = "soap"
+version = "0.0.1"
+description = "Simple Organisation App built with Python"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "pydantic>=2.13.4",
+    "textual>=8.2.8",
+    "typer>=0.27.0",
+]

@@ -5,7 +5,22 @@ description = "Simple Organisation App built with Python"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "httpx>=0.28.1",
     "pydantic>=2.13.4",
+    "pymupdf>=1.28.0",
+    "pyyaml>=6.0.3",
     "textual>=8.2.8",
     "typer>=0.27.0",
+]
+
+[project.scripts]
+soap = "soap.main:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
 ]

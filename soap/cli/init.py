@@ -5,7 +5,7 @@ from pathlib import Path
 
 import typer
 
-from soap.db.sqlite import SCHEMA_VERSION
+from soap.db.sqlite import SqliteDatabase
 from soap.library import Library, resolve_soap_dir
 from soap.shell import detect_shell, source_command, write_shell_export
 
@@ -89,7 +89,7 @@ def init(
                 f"--force: backed up existing database to {_display(backup_path)} "
                 "before recreating it"
             )
-        _ok("database", f"soap.db (schema v{SCHEMA_VERSION})")
+        _ok("database", f"soap.db (schema v{SqliteDatabase.SCHEMA_VERSION})")
 
     # 4. Persist SOAP_DIR to the shell config. A failure here must not abort.
     _write_shell(shell, soap_dir)

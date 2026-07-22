@@ -24,6 +24,9 @@ USER_AGENT = f"soap/0.0.1 (mailto:{CONTACT})"
 
 CROSSREF_URL = "https://api.crossref.org/works/{doi}"
 ARXIV_URL = "http://export.arxiv.org/api/query?id_list={id}"
+OPENLIBRARY_URL = (
+    "https://openlibrary.org/api/books?bibkeys=ISBN:{isbn}&format=json&jscmd=data"
+)
 
 REQUEST_TIMEOUT = 10.0
 
@@ -47,7 +50,7 @@ _ARXIV_NS = "{http://arxiv.org/schemas/atom}"
 class FetchedMetadata:
     """Normalized metadata from an online source, mapped onto our model."""
 
-    source: str  # "crossref" or "arxiv"
+    source: str  # "crossref", "arxiv", or "openlibrary"
     title: str | None = None
     authors: list[str] = field(default_factory=list)
     year: int | None = None
@@ -58,8 +61,7 @@ class FetchedMetadata:
     url: str | None = None
     doi: str | None = None
     arxiv_id: str | None = None
-    # An open-access PDF link the source advertised, if any (used by URL adds).
-    pdf_url: str | None = None
+    isbn: str | None = None
 
 
 def _strip_jats(text: str | None) -> str | None:
@@ -99,12 +101,6 @@ def parse_crossref(payload: dict) -> FetchedMetadata:
     cr_type = msg.get("type")
     doc_type = _CROSSREF_TYPE.get(cr_type, cr_type)
 
-    pdf_url = None
-    for link in msg.get("link", []) or []:
-        if link.get("content-type") == "application/pdf":
-            pdf_url = link.get("URL")
-            break
-
     return FetchedMetadata(
         source="crossref",
         title=title,
@@ -116,7 +112,6 @@ def parse_crossref(payload: dict) -> FetchedMetadata:
         abstract=_strip_jats(msg.get("abstract")),
         url=msg.get("URL"),
         doi=msg.get("DOI"),
-        pdf_url=pdf_url,
     )
 
 
@@ -172,12 +167,6 @@ def parse_arxiv(xml_text: str) -> FetchedMetadata | None:
     journal_el = entry.find(f"{_ARXIV_NS}journal_ref")
     venue = journal_el.text.strip() if journal_el is not None and journal_el.text else None
 
-    pdf_url = None
-    for link in entry.findall(f"{_ATOM}link"):
-        if link.get("title") == "pdf":
-            pdf_url = link.get("href")
-            break
-
     return FetchedMetadata(
         source="arxiv",
         title=title,
@@ -189,7 +178,40 @@ def parse_arxiv(xml_text: str) -> FetchedMetadata | None:
         url=url,
         doi=doi,
         arxiv_id=arxiv_id,
-        pdf_url=pdf_url,
+    )
+
+
+def parse_openlibrary(payload: dict, isbn: str) -> FetchedMetadata | None:
+    """Map an Open Library ``books?jscmd=data`` body onto ``FetchedMetadata``.
+
+    The response is keyed by ``"ISBN:<isbn>"``; an unknown ISBN yields an empty
+    object, which we treat as a miss.
+    """
+    entry = payload.get(f"ISBN:{isbn}") or {}
+    if not entry:
+        return None
+
+    authors = [a["name"].strip() for a in entry.get("authors", []) if a.get("name")]
+
+    year = None
+    published = entry.get("publish_date")
+    if published:
+        m = re.search(r"\d{4}", published)
+        if m:
+            year = int(m.group(0))
+
+    publishers = entry.get("publishers") or []
+    publisher = publishers[0].get("name") if publishers and publishers[0] else None
+
+    return FetchedMetadata(
+        source="openlibrary",
+        title=(entry.get("title") or None),
+        authors=authors,
+        year=year,
+        publisher=publisher,
+        type="book",
+        url=entry.get("url"),
+        isbn=isbn,
     )
 
 
@@ -205,7 +227,7 @@ def _get(
     learns the lookup failed and should fall back to local metadata.
     """
     headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
-    for attempt in range(2):
+    for _ in range(2):
         try:
             resp = client.get(url, headers=headers, timeout=timeout, follow_redirects=True)
         except (httpx.TimeoutException, httpx.TransportError):
@@ -250,12 +272,31 @@ def fetch_arxiv(arxiv_id: str, *, client: httpx.Client | None = None) -> Fetched
             client.close()
 
 
+def fetch_isbn(isbn: str, *, client: httpx.Client | None = None) -> FetchedMetadata | None:
+    """Fetch and map Open Library metadata for ``isbn`` (``None`` on failure)."""
+    owns = client is None
+    client = client or httpx.Client()
+    try:
+        resp = _get(OPENLIBRARY_URL.format(isbn=isbn), client=client)
+        if resp is None or resp.status_code != 200:
+            return None
+        try:
+            return parse_openlibrary(resp.json(), isbn)
+        except (ValueError, KeyError):
+            return None
+    finally:
+        if owns:
+            client.close()
+
+
 def fetch_for_identifier(identifier, *, client: httpx.Client | None = None) -> FetchedMetadata | None:
-    """Dispatch to Crossref or arXiv based on an ``Identifier``'s kind."""
+    """Dispatch to Crossref, arXiv, or Open Library by the identifier's kind."""
     if identifier is None:
         return None
     if identifier.kind == "doi":
         return fetch_crossref(identifier.value, client=client)
     if identifier.kind == "arxiv":
         return fetch_arxiv(identifier.value, client=client)
+    if identifier.kind == "isbn":
+        return fetch_isbn(identifier.value, client=client)
     return None

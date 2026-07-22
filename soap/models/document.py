@@ -14,6 +14,7 @@ class Source(str, Enum):
 
     CROSSREF = "crossref"
     ARXIV = "arxiv"
+    OPENLIBRARY = "openlibrary"
     MANUAL = "manual"
     LOCAL = "local"
 

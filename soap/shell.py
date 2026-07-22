@@ -3,6 +3,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+
 BLOCK_START = "# >>> soap >>>"
 BLOCK_END = "# <<< soap <<<"
 
@@ -84,9 +85,7 @@ def write_shell_export(shell: str, soap_dir: Path) -> ShellResult:
         config_path.write_text(prefix + block + "\n")
         return ShellResult(shell, config_path, export_line, "added")
     except OSError as exc:
-        return ShellResult(
-            shell, config_path, export_line, "failed", error=str(exc)
-        )
+        return ShellResult(shell, config_path, export_line, "failed", error=str(exc))
 
 
 def source_command(config_path: Path) -> str:

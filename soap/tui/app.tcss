@@ -1,0 +1,145 @@
+/* Structural layout for the soap TUI. Colors come from the active theme
+   ($background/$surface/$panel/$primary/$accent) and the custom $text-muted var, so
+   switching themes reskins everything without touching this file. */
+
+Screen {
+    background: $background;
+}
+
+/* --- top bar: logo + search ------------------------------------------- */
+
+#topbar {
+    height: 3;
+    background: $surface;
+    padding: 0 2;
+    align-vertical: middle;
+}
+
+#logo {
+    width: auto;
+    height: 1;
+    color: $accent;
+    text-style: bold;
+    padding: 0 3 0 0;
+}
+
+#search {
+    width: 1fr;
+    height: 1;
+    border: none;
+    padding: 0;
+    background: $surface;
+    color: $foreground;
+}
+#search:focus {
+    background: $panel;
+}
+
+/* --- inbox bar (hidden when the inbox is empty) ----------------------- */
+
+#inboxbar {
+    height: 1;
+    background: $surface;
+    color: $accent;
+    text-style: bold;
+    padding: 0 2;
+}
+
+/* --- three-pane body -------------------------------------------------- */
+
+#body {
+    height: 1fr;
+}
+
+#sidebar {
+    width: 24;
+    min-width: 20;
+    background: $panel;
+    padding: 1 1;
+    border-right: solid $background;
+}
+
+#doclist {
+    width: 3fr;
+    background: $background;
+    padding: 1 1;
+}
+
+#detail {
+    width: 2fr;
+    min-width: 30;
+    background: $panel;
+    padding: 1 2;
+    border-left: solid $background;
+}
+
+#detail-body {
+    width: 1fr;
+}
+
+/* --- sidebar rows ----------------------------------------------------- */
+
+.side-header-item {
+    background: transparent;
+    padding: 1 0 0 0;
+    height: auto;
+}
+.side-header {
+    color: $text-muted;
+    text-style: bold;
+}
+.side-row {
+    layout: horizontal;
+    height: 1;
+    padding: 0 1;
+}
+.side-label {
+    width: 1fr;
+}
+.side-count {
+    width: auto;
+    color: $text-muted;
+}
+
+/* --- document rows ---------------------------------------------------- */
+
+.doc-row {
+    layout: horizontal;
+    height: 1;
+    padding: 0 1;
+}
+.doc-title {
+    width: 1fr;
+}
+.doc-year {
+    width: 6;
+    text-align: right;
+    color: $text-muted;
+}
+
+/* --- modals: review, help, empty-library ------------------------------ */
+
+ReviewScreen, HelpScreen {
+    align: center middle;
+    background: $background 70%;
+}
+
+#review-card, #help-card, #empty-card {
+    width: 72;
+    max-width: 90%;
+    background: $surface;
+    border: round $primary;
+    padding: 1 3;
+}
+
+#review-progress {
+    padding: 0 0 1 0;
+}
+#review-hint {
+    padding: 1 0 0 0;
+}
+#empty-card {
+    border: round $accent;
+    content-align: center middle;
+    padding: 2 4;
+}

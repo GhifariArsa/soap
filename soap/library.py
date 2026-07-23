@@ -517,3 +517,70 @@ def _open_in_editor(document: Document, run_editor) -> Document:
         return Document(**data)
     finally:
         tmp.unlink(missing_ok=True)
+
+
+# --- browse / review read-write helpers -----------------------------------
+#
+# The TUI reads through DocumentService but writes through these functions so
+# the "info.yaml on disk is authoritative, SQLite is a rebuildable index"
+# invariant holds: every mutation rewrites the yaml first, then re-syncs the DB.
+
+
+def info_yaml_path(library: "Library", doc_id: str) -> Path:
+    return library.documents / doc_id / "info.yaml"
+
+
+def load_document(library: "Library", doc_id: str) -> Document:
+    """Read and validate a document's ``info.yaml`` from disk."""
+    data = yaml.safe_load(info_yaml_path(library, doc_id).read_text())
+    return Document(**data)
+
+
+def save_document(
+    library: "Library", document: Document, docs: DocumentService
+) -> None:
+    """Persist an edited document: rewrite ``info.yaml`` then re-index it.
+
+    The id (and folder) never change here — only metadata. The DB rows are
+    rebuilt from scratch (``remove`` + ``index``) so author/tag/collection
+    changes are reflected without stale links.
+    """
+    _write_info_yaml(info_yaml_path(library, document.id), document)
+    docs.remove(document.id)
+    docs.index(document)
+
+
+def set_review_status(
+    library: "Library",
+    doc_id: str,
+    status: str,
+    docs: DocumentService,
+) -> Document:
+    """Flip a document's review flag on disk (source of truth) then in the index."""
+    document = load_document(library, doc_id)
+    document.review_status = status
+    _write_info_yaml(info_yaml_path(library, doc_id), document)
+    docs.set_review_status(doc_id, status)
+    return document
+
+
+def edit_document(
+    library: "Library",
+    doc_id: str,
+    docs: DocumentService,
+    editor_runner=None,
+) -> Document:
+    """Open a document's ``info.yaml`` in ``$EDITOR``, then re-validate and re-index.
+
+    Keeps the id fixed (no folder rename on edit). Raises ``yaml.YAMLError`` or
+    ``ValueError`` if the edited file no longer validates; the on-disk file is
+    left as the user saved it so nothing is lost.
+    """
+    run_editor = editor_runner or _default_editor_runner
+    path = info_yaml_path(library, doc_id)
+    run_editor(path)
+    data = yaml.safe_load(path.read_text())
+    document = Document(**data)
+    document.id = doc_id  # never let an edit repoint the folder
+    save_document(library, document, docs)
+    return document

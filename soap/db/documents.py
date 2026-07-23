@@ -12,10 +12,27 @@ context manager::
 """
 
 import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
 
 from soap.db.sqlite import SqliteDatabase
 from soap.models.document import Document, FileRef
+
+
+@dataclass
+class DocumentRow:
+    """A lightweight document row for list rendering — no linked tables joined.
+
+    The TUI draws hundreds of these, so it deliberately avoids hydrating authors
+    / tags / files for every row. Full hydration happens only for the selected
+    document via :meth:`DocumentService.get_document`.
+    """
+
+    id: str
+    title: str
+    year: int | None
+    review_status: str
+    source: str
 
 
 class DocumentService:
@@ -90,6 +107,145 @@ class DocumentService:
             is not None
         )
 
+    # -- reads (TUI / browse) ---------------------------------------------
+
+    def library_counts(self) -> dict[str, int]:
+        """Counts for the sidebar's LIBRARY section: all / inbox / to-read."""
+        one = lambda sql: self.conn.execute(sql).fetchone()[0]  # noqa: E731
+        return {
+            "all": one("SELECT COUNT(*) FROM documents"),
+            "inbox": one(
+                "SELECT COUNT(*) FROM documents WHERE review_status = 'needs_review'"
+            ),
+            "toread": one(
+                "SELECT COUNT(*) FROM documents WHERE read_status = 'unread'"
+            ),
+        }
+
+    def inbox_count(self) -> int:
+        return self.library_counts()["inbox"]
+
+    def tag_counts(self) -> list[tuple[str, int]]:
+        """`(tag, count)` ordered by count desc — for the sidebar TAGS section."""
+        rows = self.conn.execute(
+            "SELECT t.name, COUNT(dt.document_id) AS c "
+            "FROM tags t JOIN document_tags dt ON dt.tag_id = t.id "
+            "GROUP BY t.id ORDER BY c DESC, t.name"
+        ).fetchall()
+        return [(r[0], r[1]) for r in rows]
+
+    def collection_counts(self) -> list[tuple[str, int]]:
+        """`(collection, count)` ordered by name — for the COLLECTIONS section."""
+        rows = self.conn.execute(
+            "SELECT c.name, COUNT(dc.document_id) AS n "
+            "FROM collections c JOIN document_collections dc "
+            "ON dc.collection_id = c.id "
+            "GROUP BY c.id ORDER BY c.name COLLATE NOCASE"
+        ).fetchall()
+        return [(r[0], r[1]) for r in rows]
+
+    def list_documents(
+        self,
+        *,
+        filter_kind: str = "all",
+        filter_value: str | None = None,
+        search: str | None = None,
+    ) -> list[DocumentRow]:
+        """Rows matching a sidebar filter, optionally narrowed by search text.
+
+        ``filter_kind`` is one of ``all``/``inbox``/``toread``/``tag``/
+        ``collection``; ``filter_value`` names the tag or collection. ``search``
+        is a case-insensitive substring matched across title, venue, author
+        names, and tags. Filter and search combine with AND.
+        """
+        where: list[str] = []
+        params: list[object] = []
+
+        if filter_kind == "inbox":
+            where.append("d.review_status = 'needs_review'")
+        elif filter_kind == "toread":
+            where.append("d.read_status = 'unread'")
+        elif filter_kind == "tag":
+            where.append(
+                "EXISTS (SELECT 1 FROM document_tags dt JOIN tags t "
+                "ON t.id = dt.tag_id WHERE dt.document_id = d.id AND t.name = ?)"
+            )
+            params.append(filter_value)
+        elif filter_kind == "collection":
+            where.append(
+                "EXISTS (SELECT 1 FROM document_collections dc JOIN collections c "
+                "ON c.id = dc.collection_id "
+                "WHERE dc.document_id = d.id AND c.name = ?)"
+            )
+            params.append(filter_value)
+
+        if search:
+            q = f"%{search}%"
+            where.append(
+                "(d.title LIKE ? OR d.venue LIKE ? "
+                "OR EXISTS (SELECT 1 FROM document_authors da JOIN authors a "
+                "ON a.id = da.author_id WHERE da.document_id = d.id AND a.name LIKE ?) "
+                "OR EXISTS (SELECT 1 FROM document_tags dt2 JOIN tags t2 "
+                "ON t2.id = dt2.tag_id WHERE dt2.document_id = d.id AND t2.name LIKE ?))"
+            )
+            params.extend([q, q, q, q])
+
+        clause = (" WHERE " + " AND ".join(where)) if where else ""
+        rows = self.conn.execute(
+            "SELECT d.id, d.title, d.year, d.review_status, d.source "
+            f"FROM documents d{clause} ORDER BY d.title COLLATE NOCASE",
+            params,
+        ).fetchall()
+        return [DocumentRow(*r) for r in rows]
+
+    def get_document(self, doc_id: str) -> Document | None:
+        """Fully hydrate one document (authors ordered, tags, collections, files)."""
+        cols = (
+            "id, type, title, year, venue, publisher, doi, arxiv_id, isbn, url, "
+            "abstract, language, added_at, read_status, source, confidence, "
+            "review_status"
+        )
+        row = self.conn.execute(
+            f"SELECT {cols} FROM documents WHERE id = ?", (doc_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        data = dict(zip(cols.replace(" ", "").split(","), row))
+
+        data["authors"] = [
+            r[0]
+            for r in self.conn.execute(
+                "SELECT a.name FROM authors a JOIN document_authors da "
+                "ON da.author_id = a.id WHERE da.document_id = ? "
+                "ORDER BY da.position",
+                (doc_id,),
+            )
+        ]
+        data["tags"] = [
+            r[0]
+            for r in self.conn.execute(
+                "SELECT t.name FROM tags t JOIN document_tags dt "
+                "ON dt.tag_id = t.id WHERE dt.document_id = ? ORDER BY t.name",
+                (doc_id,),
+            )
+        ]
+        data["collections"] = [
+            r[0]
+            for r in self.conn.execute(
+                "SELECT c.name FROM collections c JOIN document_collections dc "
+                "ON dc.collection_id = c.id WHERE dc.document_id = ?",
+                (doc_id,),
+            )
+        ]
+        data["files"] = [
+            FileRef(path=r[0], mime=r[1], sha256=r[2])
+            for r in self.conn.execute(
+                "SELECT path, mime, sha256 FROM files WHERE document_id = ?",
+                (doc_id,),
+            )
+        ]
+        return Document(**data)
+
     # -- writes -----------------------------------------------------------
 
     def index(self, doc: Document) -> None:
@@ -162,6 +318,36 @@ class DocumentService:
                 "UPDATE documents SET review_status = 'filed' WHERE id = ?",
                 (doc_id,),
             )
+
+    def set_review_status(self, doc_id: str, status: str) -> None:
+        """Update just the review flag on an indexed document.
+
+        The on-disk ``info.yaml`` is authoritative; callers rewrite it first, so
+        this only keeps the index in sync (see :func:`soap.library.set_review_status`).
+        """
+        with self.conn:
+            self.conn.execute(
+                "UPDATE documents SET review_status = ? WHERE id = ?",
+                (status, doc_id),
+            )
+
+    def remove(self, doc_id: str) -> None:
+        """Delete a document and all its link rows in one transaction.
+
+        Used to re-index a document after its metadata is edited on disk:
+        ``remove`` then ``index`` rebuilds the rows from the fresh ``info.yaml``.
+        """
+        with self.conn:
+            for table in (
+                "document_authors",
+                "document_tags",
+                "document_collections",
+                "files",
+            ):
+                self.conn.execute(
+                    f"DELETE FROM {table} WHERE document_id = ?", (doc_id,)
+                )
+            self.conn.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
 
     def _upsert_named(self, table: str, name: str) -> int:
         """Insert ``name`` into a ``(id, name UNIQUE)`` table, return its id."""

@@ -67,6 +67,12 @@ def init(
         )
         raise typer.Exit(code=1)
 
+    # 2b. Drop a starter config.yaml (never overwrite an existing one, so this is
+    #     idempotent and --force-safe). The PRD recommends always_review while
+    #     the pipeline is still earning trust; the loader defaults to false if
+    #     the file is ever removed.
+    _write_starter_config(soap_dir)
+
     # 3. Create and initialize the database (unless already present w/o --force).
     backup_path = None
     if already_initialized:
@@ -93,6 +99,31 @@ def init(
 
     # 4. Persist SOAP_DIR to the shell config. A failure here must not abort.
     _write_shell(shell, soap_dir)
+
+
+def _write_starter_config(soap_dir: Path) -> None:
+    """Write ``config.yaml`` with the recommended ``always_review: true``.
+
+    Guarded: if the file already exists it is left untouched, so re-running
+    ``init`` (even with ``--force``) never clobbers a user's config.
+    """
+    from soap.config import config_path
+
+    path = config_path(soap_dir)
+    if path.exists():
+        return
+    try:
+        path.write_text(
+            "# soap library configuration.\n"
+            "# Route every add through the needs_review queue while you build\n"
+            "# trust in the ingestion pipeline. Set to false to file confident\n"
+            "# adds automatically.\n"
+            "always_review: true\n"
+        )
+    except OSError as exc:
+        _warn(f"could not write {_display(path)} ({exc}); using defaults")
+        return
+    _ok("config", f"{_display(path)} (always_review: true)")
 
 
 def _write_shell(shell: ShellChoice, soap_dir: Path) -> None:

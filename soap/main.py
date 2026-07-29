@@ -1,10 +1,11 @@
 import typer
 
-from soap.cli import init, library
+from soap.cli import init, inbox, library
 
 app = typer.Typer()
 app.add_typer(init.app)
 app.add_typer(library.app)
+app.add_typer(inbox.app, name="inbox")
 
 
 @app.callback(invoke_without_command=True)

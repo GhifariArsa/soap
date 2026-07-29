@@ -198,6 +198,19 @@ class DocumentService:
         ).fetchall()
         return [DocumentRow(*r) for r in rows]
 
+    def needs_review_ids(self) -> list[str]:
+        """Ids of documents in the ``needs_review`` queue, oldest first.
+
+        Ordered by ``added_at`` (then ``id`` as a stable tiebreak for rows added
+        in the same second or with a null timestamp) so the inbox review walk
+        resolves the queue in arrival order.
+        """
+        rows = self.conn.execute(
+            "SELECT id FROM documents WHERE review_status = 'needs_review' "
+            "ORDER BY added_at IS NULL, added_at, id"
+        ).fetchall()
+        return [r[0] for r in rows]
+
     def get_document(self, doc_id: str) -> Document | None:
         """Fully hydrate one document (authors ordered, tags, collections, files)."""
         cols = (

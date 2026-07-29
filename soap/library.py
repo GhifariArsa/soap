@@ -10,6 +10,7 @@ from pathlib import Path
 import httpx
 import yaml
 
+from soap.config import load_config
 from soap.db import sqlite
 from soap.db.documents import DocumentService
 from soap.ingest import url as url_mod
@@ -341,6 +342,10 @@ def _add_inner(
     doc_url = merged.url or (source if from_url else None)
     # A document with no file is valid but always needs a human to attach one.
     review = merged.review_status if file_path is not None else ReviewStatus.NEEDS_REVIEW
+    # `always_review: true` in $SOAP_DIR/config.yaml routes every add through the
+    # needs_review queue regardless of confidence/source (opt-in trust-building).
+    if load_config(library.path).always_review:
+        review = ReviewStatus.NEEDS_REVIEW
 
     def taken(key: str) -> bool:
         return docs.id_exists(key) or (library.documents / key).exists()
@@ -584,3 +589,140 @@ def edit_document(
     document.id = doc_id  # never let an edit repoint the folder
     save_document(library, document, docs)
     return document
+
+
+def delete_document(
+    library: "Library", doc_id: str, docs: DocumentService
+) -> None:
+    """Remove a document entirely: its on-disk folder, then its index rows.
+
+    Disk is the source of truth, so the folder (``documents/<id>/`` with its
+    ``info.yaml`` and any file) is removed first; the SQLite rows are dropped
+    after. ``docs.remove`` is a no-op for an unknown id, so a document that was
+    never indexed (disk-only) still deletes cleanly.
+    """
+    shutil.rmtree(library.documents / doc_id, ignore_errors=True)
+    docs.remove(doc_id)
+
+
+# --- inbox review (the CLI counterpart of the TUI ReviewScreen) ------------
+#
+# The interactive walk over the needs_review queue. The orchestration lives
+# here — not in the CLI — so the same loop is unit-testable with scripted IO and
+# the CLI stays a thin shim. It mirrors the TUI ReviewScreen's action set
+# (accept/edit/skip/quit) and adds `delete`, which the CLI surface exposes but
+# the modal deliberately does not.
+
+REVIEW_ACTIONS = {
+    "a": "accept", "f": "accept", "accept": "accept", "file": "accept", "": "accept",
+    "e": "edit", "edit": "edit",
+    "s": "skip", "skip": "skip",
+    "d": "delete", "delete": "delete",
+    "q": "quit", "quit": "quit",
+}
+
+
+@dataclass
+class ReviewSummary:
+    """Tally of what an inbox review session did, for a closing report."""
+
+    filed: int = 0
+    skipped: int = 0
+    deleted: int = 0
+    edited: int = 0
+    errors: int = 0
+
+
+def review_inbox(
+    library: "Library",
+    docs: DocumentService,
+    *,
+    render,
+    ask_action,
+    confirm_delete,
+    report,
+    editor_runner=None,
+) -> ReviewSummary:
+    """Walk the ``needs_review`` queue one document at a time, oldest first.
+
+    IO is fully injected so this is testable without a terminal and the CLI can
+    stay a shim:
+
+    - ``render(doc, position, total)`` — show the current document.
+    - ``ask_action()`` — return the reviewer's choice (see ``REVIEW_ACTIONS``);
+      raise ``EOFError`` on end-of-input so a piped/empty stdin ends the session
+      cleanly instead of looping forever.
+    - ``confirm_delete(doc)`` -> bool — confirm a destructive delete.
+    - ``report(message)`` — emit progress/errors/notices.
+    - ``editor_runner`` — passed through to :func:`edit_document` for ``edit``.
+
+    Actions mirror the TUI: **accept** files the document, **edit** opens
+    ``info.yaml`` and re-prompts on the same item, **skip** leaves it queued and
+    advances, **delete** removes it (after confirmation), **quit** stops. An
+    error on one document (missing ``info.yaml``, invalid edit) is reported and
+    the walk continues, matching the batch resilience of ``add``.
+    """
+    summary = ReviewSummary()
+    queue = docs.needs_review_ids()
+    total = len(queue)
+    if total == 0:
+        return summary
+
+    pos = 0
+    while pos < total:
+        doc_id = queue[pos]
+        doc = docs.get_document(doc_id)
+        if doc is None:  # filed/deleted from under us since the snapshot
+            pos += 1
+            continue
+
+        render(doc, pos, total)
+        try:
+            raw = ask_action()
+        except EOFError:
+            break  # piped/empty stdin: end cleanly, never hang
+        action = REVIEW_ACTIONS.get(raw.strip().lower())
+        if action is None:
+            report(f"unknown action {raw.strip()!r} — a/e/s/d/q")
+            continue  # re-prompt on the same document
+
+        if action == "quit":
+            break
+        if action == "skip":
+            summary.skipped += 1
+            pos += 1
+            continue
+        if action == "accept":
+            try:
+                set_review_status(library, doc_id, ReviewStatus.FILED.value, docs)
+                summary.filed += 1
+            except Exception as exc:  # noqa: BLE001 - report, keep going
+                summary.errors += 1
+                report(f"could not file {doc_id}: {exc}")
+            pos += 1
+            continue
+        if action == "delete":
+            try:
+                if not confirm_delete(doc):
+                    continue  # cancelled: stay on the same document
+            except EOFError:
+                break
+            try:
+                delete_document(library, doc_id, docs)
+                summary.deleted += 1
+            except Exception as exc:  # noqa: BLE001
+                summary.errors += 1
+                report(f"could not delete {doc_id}: {exc}")
+            pos += 1
+            continue
+        if action == "edit":
+            try:
+                edit_document(library, doc_id, docs, editor_runner=editor_runner)
+                summary.edited += 1
+            except Exception as exc:  # noqa: BLE001 - invalid edit keeps the item
+                summary.errors += 1
+                report(f"edit not applied to {doc_id}: {exc}")
+            # Stay on the same item so the reviewer sees the result and files it.
+            continue
+
+    return summary

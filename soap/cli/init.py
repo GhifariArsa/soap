@@ -7,7 +7,8 @@ import typer
 
 from soap.db.sqlite import SqliteDatabase
 from soap.library import Library, resolve_soap_dir
-from soap.shell import detect_shell, source_command, write_shell_export
+from soap.permissions import make_private
+from soap.shell import detect_shell, export_line, source_command, write_shell_export
 
 app = typer.Typer()
 
@@ -110,9 +111,10 @@ def _write_starter_config(soap_dir: Path) -> None:
     from soap.config import config_path
 
     path = config_path(soap_dir)
-    if path.exists():
-        return
     try:
+        if path.exists():
+            make_private(path, directory=False)
+            return
         path.write_text(
             "# soap library configuration.\n"
             "# Route every add through the needs_review queue while you build\n"
@@ -120,6 +122,7 @@ def _write_starter_config(soap_dir: Path) -> None:
             "# adds automatically.\n"
             "always_review: true\n"
         )
+        make_private(path, directory=False)
     except OSError as exc:
         _warn(f"could not write {_display(path)} ({exc}); using defaults")
         return
@@ -130,10 +133,15 @@ def _write_shell(shell: ShellChoice, soap_dir: Path) -> None:
     if shell is ShellChoice.auto:
         target = detect_shell()
         if target is None:
+            try:
+                fallback = export_line("unknown", soap_dir)
+            except ValueError as exc:
+                _warn(f"could not generate a safe SOAP_DIR export ({exc})")
+                return
             _warn(
                 "could not detect your shell from $SHELL; add SOAP_DIR yourself:"
             )
-            typer.echo(f'    export SOAP_DIR="{soap_dir}"')
+            typer.echo(f"    {fallback}")
             return
     else:
         target = shell.value
@@ -142,9 +150,10 @@ def _write_shell(shell: ShellChoice, soap_dir: Path) -> None:
     if result.status == "failed":
         _warn(
             f"could not write {_display(result.config_path)} ({result.error}); "
-            "add SOAP_DIR yourself:"
+            "add SOAP_DIR yourself"
         )
-        typer.echo(f"    {result.export_line}")
+        if result.export_line:
+            typer.echo(f"    {result.export_line}")
         return
 
     verb = {

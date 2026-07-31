@@ -4,6 +4,8 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from soap.permissions import make_private
+
 # The canonical v1 schema (see PRD Appendix B). This is the single source of
 # truth for the database shape; `init` calls into it rather than duplicating DDL.
 SCHEMA_VERSION = 1
@@ -129,6 +131,7 @@ class SqliteDatabase:
             finally:
                 connection.close()
             os.replace(tmp_path, self.path)
+            make_private(self.path, directory=False)
         except BaseException:
             tmp_path.unlink(missing_ok=True)
             raise

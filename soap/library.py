@@ -18,6 +18,7 @@ from soap.ingest.fetch import fetch_for_identifier
 from soap.ingest.identifiers import Identifier, normalize_isbn
 from soap.ingest.merge import Overrides, generate_citekey, merge_metadata, unique_citekey
 from soap.models.document import Document, FileRef, ReviewStatus
+from soap.permissions import make_private
 
 DEFAULT_SOAP_DIR = "~/.soap"
 
@@ -62,8 +63,11 @@ class Library:
     def create_directories(self) -> None:
         """Create the library directory and its subfolders (idempotent)."""
         self.path.mkdir(parents=True, exist_ok=True)
+        make_private(self.path, directory=True)
         self.inbox.mkdir(exist_ok=True)
+        make_private(self.inbox, directory=True)
         self.documents.mkdir(exist_ok=True)
+        make_private(self.documents, directory=True)
 
     def initialize_database(self, force: bool = False) -> Path | None:
         """Create and initialize ``soap.db``.
@@ -80,10 +84,12 @@ class Library:
             return None
 
         if not force:
+            make_private(self.db_path, directory=False)
             return None
 
         backup_path = self._backup_path()
         shutil.copy2(self.db_path, backup_path)
+        make_private(backup_path, directory=False)
         # create() builds in a temp file and atomically renames over the
         # existing db, so if it fails the original library (and this backup)
         # stay intact instead of being deleted up front.
@@ -512,12 +518,14 @@ def _add_body(
     folder = library.documents / citekey
     try:
         folder.mkdir(parents=True, exist_ok=False)
+        make_private(folder, directory=True)
         if file_path is not None and stored_name is not None:
             dest = folder / stored_name
             if move:
                 shutil.move(str(file_path), dest)
             else:
                 shutil.copy2(file_path, dest)
+            make_private(dest, directory=False)
         _write_info_yaml(folder / "info.yaml", document)
     except OSError as exc:
         shutil.rmtree(folder, ignore_errors=True)
@@ -555,11 +563,13 @@ def _upgrade_existing(
     stored_name = sanitize_filename(original_name) if original_name else "document.pdf"
     try:
         folder.mkdir(parents=True, exist_ok=True)
+        make_private(folder, directory=True)
         dest = folder / stored_name
         if move:
             shutil.move(str(file_path), dest)
         else:
             shutil.copy2(file_path, dest)
+        make_private(dest, directory=False)
     except OSError as exc:
         return AddOutcome(
             "error", message=f"failed to attach file to {doc_id}: {exc}",
@@ -580,8 +590,9 @@ def _upgrade_existing(
 
 
 def _write_info_yaml(path: Path, document: Document) -> None:
-    """Serialize the validated model to ``info.yaml`` in Appendix-A order."""
+    """Serialize the validated model to a private ``info.yaml`` file."""
     path.write_text(_dump_yaml(document))
+    make_private(path, directory=False)
 
 
 def _dump_yaml(document: Document) -> str:

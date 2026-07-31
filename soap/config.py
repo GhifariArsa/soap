@@ -21,6 +21,8 @@ from pathlib import Path
 
 import yaml
 
+from soap.permissions import make_private
+
 CONFIG_FILENAME = "config.yaml"
 
 
@@ -92,5 +94,6 @@ def save_theme(soap_dir: Path, theme_name: str) -> None:
     kept.append(f"theme: {theme_name}")
     try:
         path.write_text("\n".join(kept) + "\n")
+        make_private(path, directory=False)
     except OSError:
         pass

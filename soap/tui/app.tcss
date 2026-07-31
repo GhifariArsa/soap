@@ -3,11 +3,19 @@
    switching themes reskins everything without touching this file. The Aqua Slate
    system: quiet $border on every pane, teal $primary on the focused one. */
 
-/* Leave the root clear so the terminal's configured background shows through.
-   This is terminal background passthrough, not emulator opacity control; opaque
-   pane/card rules below keep the UI readable on terminals without transparency. */
+/* Leave the root at the terminal's default background so the terminal's own
+   (possibly transparent) background shows through — like lazygit/Claude Code.
+   `ansi_default` emits the terminal-default background (SGR 49), NOT a color:
+   plain `transparent` flattens to solid black here because App.render paints a
+   Blank of the root color and Textual has nothing beneath the base to composite
+   against. For SGR 49 to survive to the terminal, `ansi_color=True` on the App
+   (see soap/tui/app.py) disables Textual's ANSI→truecolor filter which would
+   otherwise convert `ansi_default` back into an opaque RGB fill.
+   This is terminal background passthrough, not emulator opacity control; the
+   opaque pane/card rules below keep the UI readable on terminals without
+   transparency (and on any terminal, text always sits on an opaque surface). */
 App, Screen {
-    background: transparent;
+    background: ansi_default;
 }
 
 /* --- top bar: brand + search + inbox pill ----------------------------- */

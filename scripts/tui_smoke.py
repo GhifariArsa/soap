@@ -132,9 +132,7 @@ def _drive_tui(binary: str, soap_dir: str) -> None:
         # terminal setup, and sending q there can be flushed before Textual's
         # input thread is ready.
         draw_deadline = time.monotonic() + DRAW_TIMEOUT
-        ready = _wait_for_marker(
-            master, proc, captured, deadline=draw_deadline
-        )
+        ready = _wait_for_marker(master, proc, captured, deadline=draw_deadline)
 
         if proc.poll() is not None:
             sys.stderr.write(

@@ -1,5 +1,8 @@
 """Unit tests for the pure ingest functions: no filesystem, no network."""
 
+import httpx
+
+from soap.ingest.download import arxiv_pdf_url, download_pdf, is_pdf_url
 from soap.ingest.fetch import (
     FetchedMetadata,
     parse_arxiv,
@@ -13,8 +16,16 @@ from soap.ingest.merge import (
     merge_metadata,
     unique_citekey,
 )
-from soap.ingest.url import arxiv_id_from_url, doi_from_url, is_url, isbn_from_url
+from soap.ingest.url import (
+    arxiv_id_from_url,
+    bare_arxiv_id,
+    doi_from_url,
+    is_url,
+    isbn_from_url,
+)
 from soap.models.document import ReviewStatus, Source
+
+from tests.conftest import mock_client
 
 
 def _fetched(**kwargs):
@@ -163,6 +174,18 @@ def test_parse_crossref_maps_fields():
     assert meta.venue == "NeurIPS"
     assert meta.type == "inproceedings"
     assert meta.abstract == "The dominant models..."
+    assert meta.pdf_url is None
+
+
+def test_parse_crossref_extracts_open_access_pdf_link():
+    payload = {"message": {
+        "title": ["Open Paper"],
+        "link": [
+            {"content-type": "text/xml", "URL": "https://x/tm.xml"},
+            {"content-type": "application/pdf", "URL": "https://x/full.pdf"},
+        ],
+    }}
+    assert parse_crossref(payload).pdf_url == "https://x/full.pdf"
 
 
 def test_parse_arxiv_maps_fields():
@@ -209,3 +232,69 @@ def test_doi_from_url():
     assert doi_from_url("https://doi.org/10.1000/abc") == "10.1000/abc"
     assert doi_from_url("https://dx.doi.org/10.2000/xyz") == "10.2000/xyz"
     assert doi_from_url("https://example.com") is None
+
+
+def test_bare_arxiv_id():
+    assert bare_arxiv_id("2006.11239") == "2006.11239"
+    assert bare_arxiv_id("2006.11239v2") == "2006.11239v2"
+    assert bare_arxiv_id("hep-th/9901001") == "hep-th/9901001"
+    assert bare_arxiv_id("paper.pdf") is None
+    assert bare_arxiv_id("10.5555/3295222.3295349") is None  # a DOI, not an id
+    assert bare_arxiv_id("/some/local/path") is None
+
+
+# --- PDF download ----------------------------------------------------------
+
+
+def test_arxiv_pdf_url_and_is_pdf_url():
+    assert arxiv_pdf_url("2006.11239v2") == "https://arxiv.org/pdf/2006.11239v2.pdf"
+    assert is_pdf_url("https://x.org/a/b.pdf")
+    assert is_pdf_url("https://x.org/b.PDF?token=1")
+    assert not is_pdf_url("https://x.org/abs/2006.11239")
+
+
+def test_download_pdf_success():
+    client = mock_client(
+        {"x.pdf": httpx.Response(
+            200, content=b"%PDF-1.5 hello", headers={"content-type": "application/pdf"}
+        )}
+    )
+    res = download_pdf("https://h/x.pdf", client=client)
+    assert res.error is None and res.path is not None
+    assert res.path.read_bytes().startswith(b"%PDF")
+    assert res.filename == "x.pdf" and res.mime == "application/pdf"
+    res.path.unlink()
+
+
+def test_download_pdf_accepts_magic_without_pdf_content_type():
+    client = mock_client(
+        {"x": httpx.Response(200, content=b"%PDF-1.4 body",
+                             headers={"content-type": "application/octet-stream"})}
+    )
+    res = download_pdf("https://h/x", client=client)
+    assert res.path is not None
+    res.path.unlink()
+
+
+def test_download_pdf_rejects_html():
+    client = mock_client(
+        {"x": httpx.Response(200, content=b"<html>paywall</html>",
+                             headers={"content-type": "text/html"})}
+    )
+    res = download_pdf("https://h/x", client=client)
+    assert res.path is None and "not a PDF" in res.error
+
+
+def test_download_pdf_404_is_error_not_raise():
+    res = download_pdf("https://h/missing.pdf", client=mock_client({}))
+    assert res.path is None and "HTTP 404" in res.error
+
+
+def test_download_pdf_oversize_rejected():
+    client = mock_client(
+        {"x.pdf": httpx.Response(
+            200, content=b"%PDF-" + b"A" * 100, headers={"content-type": "application/pdf"}
+        )}
+    )
+    res = download_pdf("https://h/x.pdf", client=client, max_bytes=10)
+    assert res.path is None and "exceeds max size" in res.error

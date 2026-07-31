@@ -10,6 +10,17 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   first, then re-syncs the SQLite index (rebuildable). Write through the helpers in
   `soap/library.py` (`save_document`, `set_review_status`, `edit_document`,
   `delete_document`), never the DB directly.
+- **Link adds download the PDF.** A URL/bare-arXiv-id add resolves metadata *and*
+  best-effort downloads the paper's PDF (`soap/ingest/download.py:download_pdf`,
+  driven from `soap/ingest/url.py:resolve_url(download=...)`): arXiv's canonical
+  `/pdf/<id>.pdf`, a direct `.pdf` URL, or an open-access PDF a DOI exposes
+  (Crossref `link`, else the doi.org redirect if it lands on a real PDF). It streams
+  to a temp file, verifies `%PDF`/content-type, caps size, and hands the temp to
+  `_add_body` which stores+attaches it via the normal local-file path (sha256,
+  `attach_file`); the temp is always cleaned up in `_add_inner`'s finally. Download
+  is gated `fetch and not dry_run`; a failed/paywalled download degrades to
+  metadata-only with a warning — never crashes. The PDF is still never parsed (the
+  abstract comes from the metadata API, not the file).
 - **CLI and TUI share the review core.** The interactive walk lives in
   `soap/library.py:review_inbox` (IO fully injected: `render`/`ask_action`/
   `confirm_delete`/`report`/`prompt_field`) so it is unit-tested without a terminal

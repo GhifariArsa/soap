@@ -260,10 +260,33 @@ def _add_inner(
     move, fetch, force, dry_run, edit, editor_runner,
     confirm, field_prompter, docs, client,
 ):
+    # A downloaded PDF lands in a temp file; ``_add_body`` records it here so we
+    # clean it up on every exit path — a failed/duplicate/dry-run add never
+    # leaves one behind, and a successful write moves it into the library first.
+    temp_holder: list[Path] = []
+    try:
+        return _add_body(
+            library, source, overrides,
+            move=move, fetch=fetch, force=force, dry_run=dry_run, edit=edit,
+            editor_runner=editor_runner, confirm=confirm,
+            field_prompter=field_prompter, docs=docs, client=client,
+            temp_holder=temp_holder,
+        )
+    finally:
+        for tmp in temp_holder:
+            tmp.unlink(missing_ok=True)
+
+
+def _add_body(
+    library, source, overrides, *,
+    move, fetch, force, dry_run, edit, editor_runner,
+    confirm, field_prompter, docs, client, temp_holder,
+):
     warnings: list[str] = []
 
-    # 1. Resolve the source. A URL yields metadata only; a local path yields a
-    #    file. Identifiers come from flags or the URL — never the PDF.
+    # 1. Resolve the source. A URL yields metadata, and (when fetching, not a
+    #    dry run) a best-effort PDF download; a local path yields a file.
+    #    Identifiers come from flags or the URL — never the PDF.
     from_url = url_mod.is_url(source)
     file_path: Path | None = None
     file_mime: str | None = None
@@ -272,12 +295,26 @@ def _add_inner(
     fetched = None
     fallback_title: str | None = None
 
-    if from_url:
-        resolution = url_mod.resolve_url(source, fetch=fetch, client=client)
+    # A bare arXiv id (``2101.00001``) is a metadata+download ref, not a path —
+    # but only when no such local file exists (a real file always wins).
+    is_ref = from_url
+    if not from_url and url_mod.bare_arxiv_id(source):
+        if not Path(source).expanduser().exists():
+            is_ref = True
+
+    if is_ref:
+        resolution = url_mod.resolve_url(
+            source, fetch=fetch, download=fetch and not dry_run, client=client
+        )
         warnings.extend(resolution.warnings)
         identifier = resolution.identifier
         fetched = resolution.fetched
         fallback_title = resolution.fallback_title
+        if resolution.file_path is not None:
+            temp_holder.append(resolution.file_path)
+            file_path = resolution.file_path
+            original_name = resolution.file_name
+            file_mime = resolution.file_mime
     else:
         path = Path(source).expanduser()
         if not path.exists():

@@ -344,6 +344,134 @@ def test_unrecognised_url_metadata_only(library):
 # --edit opens the editor and re-derives the citekey ------------------------
 
 
+# arXiv / DOI / direct-PDF link -> download & attach the PDF -----------------
+
+PDF_BYTES = b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n"
+
+
+def _pdf_response():
+    return httpx.Response(
+        200, content=PDF_BYTES, headers={"content-type": "application/pdf"}
+    )
+
+
+def _arxiv_client_with_pdf():
+    return mock_client(
+        {
+            "export.arxiv.org": httpx.Response(200, text=ARXIV_BODY),
+            "arxiv.org/pdf": _pdf_response(),
+        }
+    )
+
+
+def _assert_attached(library, outcome, filename):
+    assert outcome.status == "added"
+    assert len(outcome.document.files) == 1
+    ref = outcome.document.files[0]
+    assert ref.path == f"documents/{outcome.citekey}/{filename}"
+    assert ref.sha256 and ref.mime == "application/pdf"
+    stored = library.documents / outcome.citekey / filename
+    assert stored.exists() and stored.read_bytes().startswith(b"%PDF")
+
+
+def test_arxiv_abs_url_downloads_pdf(library):
+    outcome = add(
+        library, "https://arxiv.org/abs/2006.11239v2", client=_arxiv_client_with_pdf()
+    )
+    _assert_attached(library, outcome, "2006.11239v2.pdf")
+    assert outcome.document.source == "arxiv"
+    # The abstract still flows from the metadata fetch alongside the file.
+    assert outcome.document.abstract == "Image synthesis."
+
+
+def test_arxiv_pdf_url_form_downloads(library):
+    outcome = add(
+        library, "https://arxiv.org/pdf/2006.11239v2", client=_arxiv_client_with_pdf()
+    )
+    _assert_attached(library, outcome, "2006.11239v2.pdf")
+
+
+def test_bare_arxiv_id_downloads(library):
+    outcome = add(library, "2006.11239v2", client=_arxiv_client_with_pdf())
+    _assert_attached(library, outcome, "2006.11239v2.pdf")
+    assert outcome.document.arxiv_id == "2006.11239v2"
+
+
+def test_bare_arxiv_id_yields_to_local_file(library, make_pdf, monkeypatch):
+    # A real file named like an arXiv id must be added as a file, not a ref.
+    pdf = make_pdf("2006.11239v2")  # no .pdf suffix, but exists on disk
+    monkeypatch.chdir(pdf.parent)
+    outcome = add(library, "2006.11239v2", fetch=False)
+    assert outcome.status == "added"
+    assert outcome.document.source == "local"
+
+
+def test_direct_pdf_url_downloads(library):
+    client = mock_client({"example.com/foo.pdf": _pdf_response()})
+    outcome = add(library, "https://example.com/foo.pdf", client=client)
+    _assert_attached(library, outcome, "foo.pdf")
+    assert outcome.document.title == "foo"
+
+
+def test_doi_url_with_open_access_pdf_downloads(library):
+    body = {"message": dict(CROSSREF_BODY["message"], link=[
+        {"content-type": "application/pdf", "URL": "https://oa.example.org/paper.pdf"},
+    ])}
+    client = mock_client({
+        "api.crossref.org": httpx.Response(200, json=body),
+        "oa.example.org/paper.pdf": _pdf_response(),
+    })
+    outcome = add(library, f"https://doi.org/{DOI}", client=client)
+    _assert_attached(library, outcome, "paper.pdf")
+    assert outcome.document.doi == DOI
+
+
+def test_doi_url_paywalled_stays_metadata_only(library):
+    # Crossref has no PDF link and the DOI landing page serves HTML (404 here).
+    outcome = add(library, f"https://doi.org/{DOI}", client=_crossref_client())
+    assert outcome.status == "added"
+    assert outcome.document.files == []
+    assert outcome.document.title == "Attention Is All You Need"
+    assert any("no downloadable PDF" in w for w in outcome.warnings)
+
+
+def test_download_failure_falls_back_to_metadata(library):
+    # Metadata fetches fine; the PDF endpoint drops the connection.
+    def handler(request):
+        url = str(request.url)
+        if "export.arxiv.org" in url:
+            return httpx.Response(200, text=ARXIV_BODY)
+        raise httpx.ConnectError("boom")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    outcome = add(library, "https://arxiv.org/abs/2006.11239v2", client=client)
+    assert outcome.status == "added"
+    assert outcome.document.files == []
+    assert outcome.document.title == "Denoising Diffusion Probabilistic Models"
+    assert any("no PDF downloaded" in w for w in outcome.warnings)
+
+
+def test_no_fetch_url_makes_no_download(library):
+    def explode(request):
+        raise AssertionError("network call made under --no-fetch")
+
+    client = httpx.Client(transport=httpx.MockTransport(explode))
+    outcome = add(library, "https://example.com/foo.pdf", fetch=False, client=client)
+    assert outcome.status == "added"
+    assert outcome.document.files == []
+
+
+def test_dry_run_url_downloads_nothing(library):
+    before = set(library.documents.iterdir())
+    outcome = add(
+        library, "https://arxiv.org/abs/2006.11239v2",
+        dry_run=True, client=_arxiv_client_with_pdf(),
+    )
+    assert outcome.status == "added" and outcome.dry_run
+    assert outcome.document.files == []
+    assert set(library.documents.iterdir()) == before
+
+
 def test_edit_opens_editor_and_reidentifies(library, make_pdf):
     pdf = make_pdf("draft.pdf")
 

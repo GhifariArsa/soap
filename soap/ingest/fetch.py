@@ -62,6 +62,9 @@ class FetchedMetadata:
     doi: str | None = None
     arxiv_id: str | None = None
     isbn: str | None = None
+    # An open-access/full-text PDF URL the source exposed (Crossref ``link``),
+    # if any. Used only to best-effort download a file for a link add.
+    pdf_url: str | None = None
 
 
 def _strip_jats(text: str | None) -> str | None:
@@ -101,6 +104,14 @@ def parse_crossref(payload: dict) -> FetchedMetadata:
     cr_type = msg.get("type")
     doc_type = _CROSSREF_TYPE.get(cr_type, cr_type)
 
+    # An open-access full-text PDF link, if Crossref exposes one. Most works
+    # don't; paywalled ones list only text-mining links behind the paywall.
+    pdf_url = None
+    for link in msg.get("link") or []:
+        if (link.get("content-type") or "").lower() == "application/pdf" and link.get("URL"):
+            pdf_url = link["URL"]
+            break
+
     return FetchedMetadata(
         source="crossref",
         title=title,
@@ -112,6 +123,7 @@ def parse_crossref(payload: dict) -> FetchedMetadata:
         abstract=_strip_jats(msg.get("abstract")),
         url=msg.get("URL"),
         doi=msg.get("DOI"),
+        pdf_url=pdf_url,
     )
 
 

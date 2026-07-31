@@ -34,6 +34,51 @@ import time
 DRAW_TIMEOUT = 20.0  # seconds to see the first frame of output
 QUIT_TIMEOUT = 20.0  # seconds to exit after we send 'q'
 
+# Textual writes terminal setup (alternate screen, mouse, cursor) before the
+# application is mounted.  Those bytes are not a readiness signal: a key sent
+# then can be discarded while Textual switches the pty into application mode.
+# This title is emitted only by SoapApp's mounted, initialized layout.
+READY_MARKER = b"BROWSE"
+
+
+def _wait_for_marker(
+    master: int,
+    proc: subprocess.Popen,
+    captured: bytearray,
+    *,
+    deadline: float,
+    marker: bytes = READY_MARKER,
+    select_fn=select.select,
+    read_fn=os.read,
+    clock=time.monotonic,
+) -> bool:
+    """Wait for a rendered TUI marker, rather than arbitrary terminal bytes.
+
+    The injected seams make the readiness protocol testable without starting a
+    frozen binary.  In particular, the first output from Textual is only
+    terminal setup, so treating any output as "drawn" races the input thread.
+    """
+    while True:
+        now = clock()
+        if now >= deadline:
+            return False
+        if proc.poll() is not None:
+            return False
+        timeout = max(0.0, deadline - now)
+        rlist, _, _ = select_fn([master], [], [], min(timeout, 0.25))
+        if master not in rlist:
+            continue
+        try:
+            chunk = read_fn(master, 4096)
+        except OSError:
+            return False
+        if not chunk:
+            return False
+        captured.extend(chunk)
+        if marker in captured:
+            return True
+    return False
+
 
 def _run_init(binary: str, soap_dir: str) -> None:
     """Create a library so the TUI has something to open (non-TUI codepath)."""
@@ -83,32 +128,23 @@ def _drive_tui(binary: str, soap_dir: str) -> None:
                 captured.extend(chunk)
 
     try:
-        # 1. Wait for the first frame of output = the TUI is up and rendering.
-        drew = False
+        # 1. Wait for a marker from the mounted TUI.  The first output is only
+        # terminal setup, and sending q there can be flushed before Textual's
+        # input thread is ready.
         draw_deadline = time.monotonic() + DRAW_TIMEOUT
-        while time.monotonic() < draw_deadline:
-            rlist, _, _ = select.select([master], [], [], 0.25)
-            if master in rlist:
-                try:
-                    chunk = os.read(master, 4096)
-                except OSError:
-                    break
-                if chunk:
-                    captured.extend(chunk)
-                    drew = True
-                    break
-            if proc.poll() is not None:
-                break
+        ready = _wait_for_marker(master, proc, captured, deadline=draw_deadline)
 
         if proc.poll() is not None:
             sys.stderr.write(
-                f"TUI exited before drawing (code {proc.returncode}).\n"
+                f"TUI exited before becoming ready (code {proc.returncode}).\n"
             )
             _dump(captured)
             raise SystemExit(1)
 
-        if not drew:
-            sys.stderr.write("TUI produced no output within the draw timeout.\n")
+        if not ready:
+            sys.stderr.write(
+                "TUI did not render a ready frame within the draw timeout.\n"
+            )
             proc.kill()
             _dump(captured)
             raise SystemExit(1)

@@ -1,6 +1,7 @@
 """Integration tests for `library.add` — manual ingestion with DOI/arXiv fetch."""
 
 import httpx
+import pytest
 import yaml
 
 from soap.db.documents import DocumentService
@@ -232,6 +233,34 @@ def test_offline_network_failure_falls_back(library, make_pdf):
     assert any("lookup failed" in w for w in outcome.warnings)
 
 
+@pytest.mark.parametrize(
+    "kind,bad_response,route",
+    [
+        ("doi", httpx.Response(200, json={"message": {"title": "wrong"}}), "api.crossref.org"),
+        ("arxiv", httpx.Response(200, json=[]), "export.arxiv.org"),
+        ("isbn", httpx.Response(200, json=[]), "openlibrary.org/api/books"),
+    ],
+)
+def test_add_malformed_provider_payload_falls_back_with_warning(
+    library, make_pdf, kind, bad_response, route
+):
+    pdf = make_pdf(f"bad-{kind}.pdf")
+    overrides = {
+        "doi": Overrides(doi=DOI),
+        "arxiv": Overrides(arxiv_id="2006.11239v2"),
+        "isbn": Overrides(isbn=ISBN),
+    }[kind]
+    outcome = add(
+        library,
+        str(pdf),
+        overrides=overrides,
+        client=mock_client({route: bad_response}),
+    )
+    assert outcome.status == "added"
+    assert outcome.document.title == f"bad {kind}"
+    assert any("lookup failed" in warning for warning in outcome.warnings)
+
+
 # Dry-run writes nothing ----------------------------------------------------
 
 
@@ -444,15 +473,38 @@ def test_direct_pdf_url_downloads(library):
 
 def test_doi_url_with_open_access_pdf_downloads(library):
     body = {"message": dict(CROSSREF_BODY["message"], link=[
-        {"content-type": "application/pdf", "URL": "https://oa.example.org/paper.pdf"},
+        {"content-type": "application/pdf", "URL": "https://example.com/paper.pdf"},
     ])}
     client = mock_client({
         "api.crossref.org": httpx.Response(200, json=body),
-        "oa.example.org/paper.pdf": _pdf_response(),
+        "example.com/paper.pdf": _pdf_response(),
     })
     outcome = add(library, f"https://doi.org/{DOI}", client=client)
     _assert_attached(library, outcome, "paper.pdf")
     assert outcome.document.doi == DOI
+
+
+def test_doi_private_open_access_pdf_is_skipped(library):
+    body = {"message": dict(CROSSREF_BODY["message"], link=[
+        {"content-type": "application/pdf", "URL": "http://127.0.0.1/paper.pdf"},
+    ])}
+    seen = []
+
+    def handler(request):
+        seen.append(str(request.url))
+        if "api.crossref.org" in str(request.url):
+            return httpx.Response(200, json=body)
+        raise AssertionError("private metadata-selected PDF was requested")
+
+    outcome = add(
+        library,
+        f"https://doi.org/{DOI}",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    assert outcome.status == "added"
+    assert outcome.document.files == []
+    assert seen == [f"https://api.crossref.org/works/{DOI}"]
+    assert any("no downloadable PDF" in warning for warning in outcome.warnings)
 
 
 def test_doi_url_paywalled_stays_metadata_only(library):

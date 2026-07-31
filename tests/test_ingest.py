@@ -1,10 +1,15 @@
 """Unit tests for the pure ingest functions: no filesystem, no network."""
 
 import httpx
+import pytest
 
 from soap.ingest.download import arxiv_pdf_url, download_pdf, is_pdf_url
 from soap.ingest.fetch import (
+    MAX_METADATA_BYTES,
     FetchedMetadata,
+    fetch_arxiv,
+    fetch_crossref,
+    fetch_isbn,
     parse_arxiv,
     parse_crossref,
     parse_openlibrary,
@@ -16,6 +21,7 @@ from soap.ingest.merge import (
     merge_metadata,
     unique_citekey,
 )
+from soap.ingest.network import MAX_REDIRECTS
 from soap.ingest.url import (
     arxiv_id_from_url,
     bare_arxiv_id,
@@ -147,6 +153,23 @@ def test_parse_openlibrary_unknown_isbn():
     assert parse_openlibrary({}, "9999999999999") is None
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [None, [], {"ISBN:9780134685991": None}, {"ISBN:9780134685991": []}],
+)
+def test_parse_openlibrary_malformed_payload_is_a_miss(payload):
+    assert parse_openlibrary(payload, "9780134685991") is None
+
+
+def test_parse_openlibrary_wrong_typed_nested_fields_are_a_miss():
+    assert parse_openlibrary({"ISBN:9780134685991": {
+        "title": 42,
+        "authors": [None, "wrong", {"name": 7}],
+        "publish_date": [],
+        "publishers": [None, {"name": []}],
+    }}, "9780134685991") is None
+
+
 # --- fetch parsers --------------------------------------------------------
 
 
@@ -188,6 +211,23 @@ def test_parse_crossref_extracts_open_access_pdf_link():
     assert parse_crossref(payload).pdf_url == "https://x/full.pdf"
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [None, [], {"message": None}, {"message": []}, {"message": {"title": "wrong"}}],
+)
+def test_parse_crossref_malformed_payload_is_a_miss(payload):
+    assert parse_crossref(payload) is None
+
+
+def test_parse_crossref_wrong_typed_nested_fields_are_a_miss():
+    assert parse_crossref({"message": {
+        "title": ["Valid"],
+        "author": [None, "wrong", {"given": 4, "family": ["bad"]}],
+        "issued": {"date-parts": "wrong"},
+        "link": [None, {"content-type": [], "URL": {}}],
+    }}) is None
+
+
 def test_parse_arxiv_maps_fields():
     xml = """<?xml version="1.0"?>
     <feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
@@ -210,6 +250,71 @@ def test_parse_arxiv_maps_fields():
 def test_parse_arxiv_no_entry():
     xml = '<feed xmlns="http://www.w3.org/2005/Atom"></feed>'
     assert parse_arxiv(xml) is None
+
+
+@pytest.mark.parametrize("payload", [None, b"not xml", "<html>no feed</html>", "<feed"])
+def test_parse_arxiv_malformed_payload_is_a_miss(payload):
+    assert parse_arxiv(payload) is None
+
+
+# --- fetch boundary -------------------------------------------------------
+
+
+def test_fetch_providers_reject_malformed_payloads_without_raising():
+    crossref = mock_client({"api.crossref.org": httpx.Response(200, json=None)})
+    assert fetch_crossref("10.5555/example", client=crossref) is None
+
+    arxiv = mock_client({"export.arxiv.org": httpx.Response(200, json=[])})
+    assert fetch_arxiv("2006.11239", client=arxiv) is None
+
+    openlibrary = mock_client({"openlibrary.org/api/books": httpx.Response(200, json=[])})
+    assert fetch_isbn("9780134685991", client=openlibrary) is None
+
+
+def test_metadata_response_is_bounded_without_content_length():
+    oversized = b"x" * (MAX_METADATA_BYTES + 1)
+    client = mock_client({"api.crossref.org": httpx.Response(200, content=oversized)})
+    assert fetch_crossref("10.5555/example", client=client) is None
+
+
+def test_metadata_content_length_is_bounded_before_reading_body():
+    response = httpx.Response(
+        200,
+        content=b"{}",
+        headers={"content-length": str(MAX_METADATA_BYTES + 1)},
+    )
+    client = mock_client({"api.crossref.org": response})
+    assert fetch_crossref("10.5555/example", client=client) is None
+
+
+def test_metadata_redirect_chain_is_followed_and_validated():
+    seen = []
+
+    def handler(request):
+        seen.append(str(request.url))
+        if request.url.path == "/works/10.5555/example":
+            return httpx.Response(302, headers={"location": "/metadata"})
+        return httpx.Response(200, json={"message": {"title": ["Safe"]}})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    meta = fetch_crossref("10.5555/example", client=client)
+    assert meta is not None and meta.title == "Safe"
+    assert seen == [
+        "https://api.crossref.org/works/10.5555/example",
+        "https://api.crossref.org/metadata",
+    ]
+
+
+def test_metadata_private_redirect_is_rejected_before_request():
+    seen = []
+
+    def handler(request):
+        seen.append(str(request.url))
+        return httpx.Response(302, headers={"location": "http://127.0.0.1/secret"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert fetch_crossref("10.5555/example", client=client) is None
+    assert seen == ["https://api.crossref.org/works/10.5555/example"]
 
 
 # --- url helpers ----------------------------------------------------------
@@ -274,6 +379,90 @@ def test_download_pdf_accepts_magic_without_pdf_content_type():
     res = download_pdf("https://h/x", client=client)
     assert res.path is not None
     res.path.unlink()
+
+
+def test_download_pdf_requires_magic_even_when_content_type_is_pdf():
+    client = mock_client(
+        {"x.pdf": httpx.Response(
+            200, content=b"<html>not a pdf</html>",
+            headers={"content-type": "application/pdf"},
+        )}
+    )
+    res = download_pdf("https://h/x.pdf", client=client)
+    assert res.path is None and "not a PDF" in res.error
+
+
+def test_download_pdf_rejects_private_initial_destinations():
+    for url in (
+        "http://127.0.0.1/paper.pdf",
+        "http://10.0.0.1/paper.pdf",
+        "http://169.254.169.254/paper.pdf",
+        "http://192.0.2.1/paper.pdf",
+        "http://[::1]/paper.pdf",
+        "http://localhost/paper.pdf",
+    ):
+        called = []
+
+        def handler(request):
+            called.append(request)
+            raise AssertionError("private destination was requested")
+
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        res = download_pdf(url, client=client)
+        assert res.path is None and "private" in res.error.lower()
+        assert called == []
+
+
+def test_download_pdf_validates_each_redirect_target():
+    seen = []
+
+    def handler(request):
+        seen.append(str(request.url))
+        if request.url.path == "/start.pdf":
+            return httpx.Response(302, headers={"location": "/hop"})
+        if request.url.path == "/hop":
+            return httpx.Response(302, headers={"location": "/final.pdf"})
+        return httpx.Response(
+            200, content=b"%PDF-1.7 body", headers={"content-type": "application/pdf"}
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    res = download_pdf("https://example.com/start.pdf", client=client)
+    assert res.path is not None and res.filename == "final.pdf"
+    assert seen == [
+        "https://example.com/start.pdf",
+        "https://example.com/hop",
+        "https://example.com/final.pdf",
+    ]
+    res.path.unlink()
+
+
+def test_download_pdf_rejects_private_redirect_before_requesting_it():
+    seen = []
+
+    def handler(request):
+        seen.append(str(request.url))
+        return httpx.Response(
+            302, headers={"location": "http://169.254.169.254/latest/meta-data"}
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    res = download_pdf("https://example.com/start.pdf", client=client)
+    assert res.path is None and "private" in res.error.lower()
+    assert seen == ["https://example.com/start.pdf"]
+
+
+def test_download_pdf_stops_redirect_loop():
+    seen = []
+
+    def handler(request):
+        seen.append(str(request.url))
+        return httpx.Response(302, headers={"location": "/again.pdf"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    res = download_pdf("https://example.com/start.pdf", client=client)
+    assert res.path is None and "too many redirects" in res.error
+    assert len(seen) == MAX_REDIRECTS + 1
 
 
 def test_download_pdf_rejects_html():

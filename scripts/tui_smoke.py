@@ -135,16 +135,12 @@ def _drive_tui(binary: str, soap_dir: str) -> None:
         ready = _wait_for_marker(master, proc, captured, deadline=draw_deadline)
 
         if proc.poll() is not None:
-            sys.stderr.write(
-                f"TUI exited before becoming ready (code {proc.returncode}).\n"
-            )
+            sys.stderr.write(f"TUI exited before becoming ready (code {proc.returncode}).\n")
             _dump(captured)
             raise SystemExit(1)
 
         if not ready:
-            sys.stderr.write(
-                "TUI did not render a ready frame within the draw timeout.\n"
-            )
+            sys.stderr.write("TUI did not render a ready frame within the draw timeout.\n")
             proc.kill()
             _dump(captured)
             raise SystemExit(1)
@@ -164,9 +160,7 @@ def _drive_tui(binary: str, soap_dir: str) -> None:
             raise SystemExit(1)
 
         if proc.returncode != 0:
-            sys.stderr.write(
-                f"TUI exited non-zero after 'q' (code {proc.returncode}).\n"
-            )
+            sys.stderr.write(f"TUI exited non-zero after 'q' (code {proc.returncode}).\n")
             _dump(captured)
             raise SystemExit(1)
     finally:

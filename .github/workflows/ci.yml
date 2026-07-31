@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_call:
+
+# Every job in this workflow is safe to run for untrusted pull requests.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.14.2"
+  UV_VERSION: "0.7.2"
+
+jobs:
+  tests:
+    name: tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@0c5e2b8115b80b4c7c5ddf6ffdd634974642d182 # v5.4.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --locked --all-groups
+      - run: uv run pytest
+
+  lint:
+    name: lint / format
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@0c5e2b8115b80b4c7c5ddf6ffdd634974642d182 # v5.4.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --locked --all-groups
+      - run: uv run ruff check soap tests scripts
+      # The release/CI entry points are the formatter-owned surface. The older
+      # fixture-heavy modules retain their historical formatting baseline.
+      - run: >-
+          uv run ruff format --check
+          soap/main.py soap/__init__.py scripts/check_wheel.py
+          scripts/tui_smoke.py tests/conftest.py tests/test_ci_workflows.py
+
+  packaging:
+    name: package / lock
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@0c5e2b8115b80b4c7c5ddf6ffdd634974642d182 # v5.4.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv lock --check
+      - run: uv sync --locked --all-groups
+      - run: uv build
+      - run: python scripts/check_wheel.py dist/*.whl
+
+  security:
+    name: security / dependencies
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@0c5e2b8115b80b4c7c5ddf6ffdd634974642d182 # v5.4.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --locked --all-groups
+      # Audit the fully locked runtime + dev dependency graph, not the local
+      # editable project. --no-emit-project avoids pip-audit's unavoidable
+      # PyPI lookup failure for this not-yet-published package.
+      - run: >-
+          uv export --locked --all-groups --format requirements-txt
+          --no-emit-project --output-file /tmp/soap-requirements.txt
+      - run: uv run pip-audit --requirement /tmp/soap-requirements.txt --strict
+
+  workflow:
+    name: workflow / config
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: astral-sh/setup-uv@0c5e2b8115b80b4c7c5ddf6ffdd634974642d182 # v5.4.1
+        with:
+          version: ${{ env.UV_VERSION }}
+          python-version: ${{ env.PYTHON_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --locked --all-groups
+      - run: uv run pytest tests/test_ci_workflows.py
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: "1.24.5"
+      - name: actionlint
+        run: |
+          set -euo pipefail
+          GOBIN="$RUNNER_TEMP/bin" go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          "$RUNNER_TEMP/bin/actionlint" .github/workflows/*.yml

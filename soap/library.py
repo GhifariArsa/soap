@@ -1,3 +1,4 @@
+import errno
 import hashlib
 import mimetypes
 import os
@@ -775,6 +776,17 @@ def _upgrade_existing(
     )
 
 
+_UNSUPPORTED_DIR_FSYNC_ERRNOS = frozenset(
+    e
+    for e in (
+        errno.EINVAL,
+        getattr(errno, "ENOTSUP", None),
+        getattr(errno, "EOPNOTSUPP", None),
+    )
+    if e is not None
+)
+
+
 def _write_info_yaml(path: Path, document: Document) -> None:
     """Atomically serialize validated metadata to a private ``info.yaml``."""
     payload = _dump_yaml(document)
@@ -790,16 +802,22 @@ def _write_info_yaml(path: Path, document: Document) -> None:
             os.fsync(handle.fileno())
         os.replace(tmp_path, path)
         make_private(path, directory=False)
-        # Persist the directory entry as well, when the platform exposes a
-        # directory fd. A failure is surfaced: the caller must not assume the
-        # metadata/index operation completed when durability could not be met.
-        directory_fd = os.open(
-            path.parent, getattr(os, "O_DIRECTORY", 0)
-        )
+        # os.replace already committed the metadata atomically. Best-effort
+        # fsync the directory entry to make the rename durable; only tolerate
+        # filesystems that do not support directory fsync (EINVAL/ENOTSUP on
+        # some FUSE, NFS/CIFS, and overlay mounts). Any other filesystem error
+        # is surfaced so callers still see genuine durability failures.
         try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
+            directory_fd = os.open(
+                path.parent, getattr(os, "O_DIRECTORY", 0)
+            )
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except OSError as exc:
+            if exc.errno not in _UNSUPPORTED_DIR_FSYNC_ERRNOS:
+                raise
     finally:
         tmp_path.unlink(missing_ok=True)
 

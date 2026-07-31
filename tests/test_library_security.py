@@ -1,5 +1,7 @@
 """Disk-first persistence and library-boundary regressions."""
 
+import errno
+
 import pytest
 
 import soap.library as library_mod
@@ -165,6 +167,52 @@ def test_upgrade_index_failure_reports_and_keeps_disk_state(library, make_pdf, m
     assert on_disk.review_status == "filed"
     with DocumentService.open(library.db_path) as docs:
         assert docs.get_document(metadata.citekey) is None
+
+
+def _fsync_raising_on_directory(errnum):
+    import os
+    import stat
+
+    real_fsync = library_mod.os.fsync
+
+    def fake_fsync(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError(errnum, "injected directory fsync failure")
+        return real_fsync(fd)
+
+    return fake_fsync
+
+
+def test_unsupported_directory_fsync_is_nonfatal(library, make_pdf, monkeypatch):
+    doc_id = _seed(library, make_pdf)
+    doc = load_document(library, doc_id)
+    doc.title = "persisted despite fsync"
+
+    monkeypatch.setattr(
+        library_mod.os, "fsync", _fsync_raising_on_directory(errno.EINVAL)
+    )
+    with DocumentService.open(library.db_path) as docs:
+        save_document(library, doc, docs)
+
+    assert load_document(library, doc_id).title == "persisted despite fsync"
+    info = info_yaml_path(library, doc_id)
+    assert not list(info.parent.glob(f".{info.name}.*.tmp"))
+
+
+def test_other_directory_fsync_error_remains_visible(library, make_pdf, monkeypatch):
+    doc_id = _seed(library, make_pdf)
+    doc = load_document(library, doc_id)
+    doc.title = "should surface"
+
+    monkeypatch.setattr(
+        library_mod.os, "fsync", _fsync_raising_on_directory(errno.EIO)
+    )
+    with DocumentService.open(library.db_path) as docs:
+        with pytest.raises(OSError, match="injected directory fsync failure"):
+            save_document(library, doc, docs)
+
+    info = info_yaml_path(library, doc_id)
+    assert not list(info.parent.glob(f".{info.name}.*.tmp"))
 
 
 def test_delete_filesystem_failure_is_visible_and_keeps_index(

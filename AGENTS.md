@@ -15,12 +15,24 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   driven from `soap/ingest/url.py:resolve_url(download=...)`): arXiv's canonical
   `/pdf/<id>.pdf`, a direct `.pdf` URL, or an open-access PDF a DOI exposes
   (Crossref `link`, else the doi.org redirect if it lands on a real PDF). It streams
-  to a temp file, verifies `%PDF`/content-type, caps size, and hands the temp to
-  `_add_body` which stores+attaches it via the normal local-file path (sha256,
-  `attach_file`); the temp is always cleaned up in `_add_inner`'s finally. Download
-  is gated `fetch and not dry_run`; a failed/paywalled download degrades to
-  metadata-only with a warning — never crashes. The PDF is still never parsed (the
-  abstract comes from the metadata API, not the file).
+  to a temp file and keeps it only if the first bytes are the `%PDF` magic marker —
+  content-type is advisory, so even `application/pdf` must start with `%PDF` — caps
+  size, and hands the temp to `_add_body` which stores+attaches it via the normal
+  local-file path (sha256, `attach_file`); the temp is always cleaned up in
+  `_add_inner`'s finally. Download is gated `fetch and not dry_run`; a failed/paywalled
+  download degrades to metadata-only with a warning — never crashes. The PDF is still
+  never parsed (the abstract comes from the metadata API, not the file).
+- **Outbound HTTP is SSRF-hardened.** Both metadata fetches (`soap/ingest/fetch.py`)
+  and the PDF download (`soap/ingest/download.py`) follow redirects manually one hop at
+  a time and route every hop — including the explicit user URL — through
+  `soap/ingest/network.py:validate_url`, which rejects non-HTTP(S) schemes, embedded
+  credentials, and any host that is or resolves to a loopback/private/link-local/reserved
+  address (`MAX_REDIRECTS` cap). Response bodies are size-bounded before a parser sees
+  them (`MAX_METADATA_BYTES` for metadata, `MAX_PDF_BYTES` for the PDF). Parsers
+  (`parse_crossref`/`parse_arxiv`/`parse_openlibrary`) validate payload shape at the
+  boundary and return `None` on malformed/wrong-type provider data, so `add` degrades
+  with a warning instead of crashing. Regression-tested in `tests/test_ingest.py` — keep
+  these seams injectable and never weaken the address checks.
 - **CLI and TUI share the review core.** The interactive walk lives in
   `soap/library.py:review_inbox` (IO fully injected: `render`/`ask_action`/
   `confirm_delete`/`report`/`prompt_field`) so it is unit-tested without a terminal

@@ -85,6 +85,23 @@ def test_workflow_actions_and_release_build_inputs_are_pinned() -> None:
     assert 'PYAPP_PYTHON_VERSION: "3.14"' in text
 
 
+def test_actionlint_config_allows_intel_macos_runner() -> None:
+    # actionlint's pinned label database (v1.7.7, see ci.yml) predates the
+    # `macos-15-intel` hosted runner and would reject release.yml's Intel target
+    # as an unknown label. The config must declare it so the workflow lint stays
+    # green while the build matrix keeps using the supported runner.
+    config = yaml.safe_load((ROOT / ".github" / "actionlint.yaml").read_text())
+    labels = config["self-hosted-runner"]["labels"]
+    assert "macos-15-intel" in labels
+
+    release = _workflow("release.yml")
+    matrix = release["jobs"]["build-binaries"]["strategy"]["matrix"]["include"]
+    runner_labels = {item["os"] for item in matrix}
+    # Every runner label the matrix uses that actionlint doesn't ship must be
+    # declared in the config, or the workflow lint fails.
+    assert "macos-15-intel" in runner_labels
+
+
 def test_pypi_keeps_oidc_least_privilege_and_environment_gate() -> None:
     publish = _workflow("release.yml")["jobs"]["publish-pypi"]
 

@@ -10,6 +10,16 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   first, then re-syncs the SQLite index (rebuildable). Write through the helpers in
   `soap/library.py` (`save_document`, `set_review_status`, `set_read_status`,
   `edit_document`, `delete_document`), never the DB directly.
+- **Library paths are owner-private; shell exports are quoted.** Anything a
+  library owns is forced to `0700`/`0600` after it is created or copied via
+  `soap/permissions.py:make_private` (source files keep their original mode
+  only until they land inside the library) — never rely on umask or an atomic
+  rename to set the mode. Generated shell startup code must go through
+  `soap/shell.py:export_line`, which shell-quotes `SOAP_DIR` per shell
+  (POSIX/`shlex` for bash/zsh/unknown-fallback, single-quote escaping for
+  fish) and rejects NUL bytes and the reserved `# >>> soap >>>` block markers;
+  never `f"...{path}..."` a path straight into a config line. Regression
+  coverage: `tests/test_security.py`.
 - **Link adds download the PDF.** A URL/bare-arXiv-id add resolves metadata *and*
   best-effort downloads the paper's PDF (`soap/ingest/download.py:download_pdf`,
   driven from `soap/ingest/url.py:resolve_url(download=...)`): arXiv's canonical

@@ -1,0 +1,128 @@
+name: release
+
+# Cutting a release is a single `git tag v0.1.0 && git push origin v0.1.0`
+# (see docs/releasing.md). `workflow_dispatch` runs a binary-build dry run only:
+# the outward publish/release jobs are gated on an actual `v*` tag push.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+# Least privilege by default; jobs widen scope only where they must.
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ── Standalone binaries: one native runner per target (no cross-compile — the
+  # pydantic-core/_yaml native wheels forbid it; see plan §0). PyApp embeds its
+  # own CPython 3.14 from python-build-standalone, so runners need only uv + Rust.
+  build-binaries:
+    name: build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14, target: macos-arm64 }
+          - { os: macos-13, target: macos-x86_64 }
+          - { os: ubuntu-24.04, target: linux-x86_64 }
+          - { os: ubuntu-24.04-arm, target: linux-arm64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build wheel
+        run: uv build # -> dist/soap_tui-*.whl (py3-none-any) + sdist
+
+      - name: Build standalone binary (PyApp)
+        env:
+          PYAPP_PYTHON_VERSION: "3.14"
+          PYAPP_DISTRIBUTION_EMBED: "1" # bake the runtime in -> offline, self-contained
+          PYAPP_EXEC_SPEC: "soap.main:app"
+          PYAPP_SELF_COMMAND: "none" # disable PyApp's `self`; soap ships its own updater
+        run: |
+          set -euo pipefail
+          wheel=$(ls "$GITHUB_WORKSPACE"/dist/*.whl)
+          echo "Building PyApp from wheel: $wheel"
+          # `--locked` is MANDATORY: without it a transitive crate can demand a
+          # newer rustc than the runner has and the build fails (plan §1.3).
+          PYAPP_PROJECT_PATH="$wheel" cargo install pyapp --locked --root out
+
+      - name: Rename + --help smoke
+        run: |
+          set -euo pipefail
+          mv out/bin/pyapp "soap-${{ matrix.target }}"
+          ./"soap-${{ matrix.target }}" --help
+
+      - name: TUI pseudo-tty smoke
+        # Launch the frozen TUI under a real pty and assert it draws + clean-exits
+        # on `q`. Catches frozen-runtime Textual regressions the --help path can't.
+        run: python3 scripts/tui_smoke.py "./soap-${{ matrix.target }}"
+
+      - name: Checksum
+        # Bare-filename form so `shasum -c` / `sha256sum -c` matches after the
+        # installer + self-update download the asset alongside its .sha256.
+        run: shasum -a 256 "soap-${{ matrix.target }}" > "soap-${{ matrix.target }}.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.target }}
+          path: soap-${{ matrix.target }}*
+          if-no-files-found: error
+
+  # ── Publish to PyPI via Trusted Publishing (OIDC). No API tokens, no
+  # username/password. Requires a one-time pending publisher on PyPI bound to
+  # this repo + workflow + the `pypi` environment (docs/releasing.md).
+  # Gated on a real tag push; a workflow_dispatch dry run never publishes.
+  publish-pypi:
+    name: publish to PyPI
+    needs: build-binaries
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions:
+      id-token: write # OIDC for Trusted Publishing
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Build wheel + sdist
+        run: uv build # one py3-none-any wheel covers every platform
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # No `with:` — Trusted Publishing supplies credentials via OIDC.
+
+  # ── Public GitHub Release with the four binaries + a combined checksum
+  # manifest. Gated on a real tag push (action-gh-release needs the tag).
+  github-release:
+    name: GitHub Release
+    needs: [build-binaries, publish-pypi]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write # create the release / upload assets
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Combine checksums
+        # One manifest the installer / `soap self update` verify downloads against.
+        run: cat artifacts/*.sha256 > checksums.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/soap-*
+            checksums.txt

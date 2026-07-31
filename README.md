@@ -1,6 +1,6 @@
 # soap
 
-**S**imple **O**rganisation **A**pp — a papis-like reference and document manager for the terminal.
+**S**imple **O**rganisation **A**pp — a reference and document manager for the terminal.
 
 soap keeps a personal library of papers, books, and PDFs on disk in a form you can
 read, grep, and version-control: every document is a plain `info.yaml` file, and a

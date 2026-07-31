@@ -73,7 +73,16 @@ class ReviewScreen(ModalScreen[tuple[int, int]]):
                     for field in CORE_REVIEW_FIELDS:
                         with Horizontal(classes="field-row"):
                             yield Static(field, classes="field-label")
-                            yield Input(id=f"f-{field}", classes="field-input")
+                            placeholder = (
+                                "Last, First; Last, First"
+                                if field == "authors"
+                                else ""
+                            )
+                            yield Input(
+                                id=f"f-{field}",
+                                classes="field-input",
+                                placeholder=placeholder,
+                            )
                     yield Static("", id="review-facts")
                     yield Static(
                         "[$text-muted]⏎/a file · c/tab correct · "

@@ -524,7 +524,12 @@ def _dump_yaml(document: Document) -> str:
     # mode="json" coerces enums (incl. defaults untouched by use_enum_values)
     # and any nested models to plain YAML-safe scalars.
     data = document.model_dump(mode="json")
-    return yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
+    # Helper comment for manual $EDITOR edits. Ignored by yaml.safe_load, so the
+    # load_document round-trip is unaffected.
+    header = (
+        "# authors is a YAML list, one entry per line, each in \"Last, First\" form.\n"
+    )
+    return header + yaml.safe_dump(data, sort_keys=False, allow_unicode=True)
 
 
 def _default_editor_runner(path: Path) -> None:

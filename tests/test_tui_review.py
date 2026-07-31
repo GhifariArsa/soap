@@ -54,6 +54,20 @@ def test_form_prefills_and_starts_in_command_mode(library, make_pdf):
     _drive(library, check)
 
 
+def test_authors_field_shows_semicolon_placeholder(library, make_pdf):
+    _seed(library, make_pdf, "a.pdf")
+
+    async def check(pilot, app, screen, ids):
+        assert (
+            screen.query_one("#f-authors", Input).placeholder
+            == "Last, First; Last, First"
+        )
+        # other fields keep the default (empty) placeholder
+        assert screen.query_one("#f-title", Input).placeholder == ""
+
+    _drive(library, check)
+
+
 def test_command_mode_accept_files_without_typing(library, make_pdf):
     doc_id = _seed(library, make_pdf, "a.pdf")
 

@@ -226,7 +226,11 @@ def test_info_yaml_round_trips(library, make_pdf):
         client=_crossref_client(),
     )
     info = library.documents / outcome.citekey / "info.yaml"
-    restored = Document(**yaml.safe_load(info.read_text()))
+    text = info.read_text()
+    # Helper comment guides manual $EDITOR edits without breaking the round-trip.
+    assert text.lstrip().startswith("#")
+    assert "Last, First" in text
+    restored = Document(**yaml.safe_load(text))
     assert restored.model_dump() == outcome.document.model_dump()
     assert restored.tags == ["nlp"]
     assert restored.collections == ["Thesis"]

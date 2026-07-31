@@ -9,6 +9,8 @@ raising) — mirroring how ``soap.config`` tolerates a broken ``config.yaml``.
 import asyncio
 from pathlib import Path
 
+from textual.color import Color
+
 from soap.config import config_path, load_config, save_theme
 from soap.library import Library
 from soap.tui.app import SoapApp
@@ -185,6 +187,31 @@ def test_app_registers_bundled_and_user_themes(library: Library):
     async def check(pilot, app):
         for name in ("aqua-slate", "one-dark", "catppuccin-mocha", "solarized"):
             assert name in app.available_themes
+
+    _run_app(library, check)
+
+
+def test_app_root_is_transparent_but_theme_surfaces_are_not(library: Library):
+    """Terminal background passthrough must not erase themed UI surfaces."""
+    _write_theme(
+        library.path,
+        "solar.yaml",
+        "name: solarized\n"
+        "surface: '#eee8d5'\n"
+        "panel: '#fdf6e3'\n",
+    )
+
+    async def check(pilot, app):
+        names = [theme.name for theme in BUNDLED_THEMES] + ["solarized"]
+        for name in names:
+            app.theme = name
+            await pilot.pause()
+            assert app.styles.background.is_transparent
+            assert app.screen.styles.background.is_transparent
+            assert not app.query_one("#topbar").styles.background.is_transparent
+            panel = app.query_one("#doclist").styles.background
+            assert not panel.is_transparent
+            assert panel == Color.parse(app.theme_variables["panel"])
 
     _run_app(library, check)
 

@@ -44,7 +44,12 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   (`parse_crossref`/`parse_arxiv`/`parse_openlibrary`) validate payload shape at the
   boundary and return `None` on malformed/wrong-type provider data, so `add` degrades
   with a warning instead of crashing. Regression-tested in `tests/test_ingest.py` — keep
-  these seams injectable and never weaken the address checks.
+  these seams injectable and never weaken the address checks. `_bounded_get`
+  reconstructs a fresh `httpx.Response` from the *decoded* streamed body, so it
+  first strips the provider's now-inaccurate `Content-Encoding`/`Content-Length`
+  headers — leaving them makes httpx re-run the gzip decoder on plain bytes and
+  raise `DecodingError`, silently turning every gzipped metadata lookup into a
+  miss (Open Library/Crossref gzip by default).
 - **CLI and TUI share the review core.** The interactive walk lives in
   `soap/library.py:review_inbox` (IO fully injected: `render`/`ask_action`/
   `confirm_delete`/`report`/`prompt_field`) so it is unit-tested without a terminal

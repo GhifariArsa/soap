@@ -1,5 +1,7 @@
 """Unit tests for the pure ingest functions: no filesystem, no network."""
 
+import gzip
+import json
 import socket
 
 import httpx
@@ -288,6 +290,49 @@ def test_metadata_content_length_is_bounded_before_reading_body():
     )
     client = mock_client({"api.crossref.org": response})
     assert fetch_crossref("10.5555/example", client=client) is None
+
+
+def _gzip_response(payload: object) -> httpx.Response:
+    """A response as a gzipping provider sends it: the body is real gzip bytes
+    and the header declares ``content-encoding: gzip``.
+
+    When ``_bounded_get`` streams this, httpx transparently decompresses the
+    body via ``iter_bytes()`` but the header still says gzip.  Reconstructing a
+    ``Response`` from the *decoded* body while carrying that stale header made
+    httpx re-run the decoder on plain bytes and raise ``DecodingError``, which
+    the fetch swallowed as a lookup miss — the regression this guards.
+    """
+    body = gzip.compress(json.dumps(payload).encode())
+    return httpx.Response(200, headers={"content-encoding": "gzip"}, content=body)
+
+
+def test_fetch_isbn_survives_gzip_content_encoding():
+    payload = {"ISBN:1098166302": {"title": "AI Engineering", "authors": [{"name": "Chip Huyen"}]}}
+    client = mock_client({"openlibrary.org/api/books": _gzip_response(payload)})
+    meta = fetch_isbn("1098166302", client=client)
+    assert meta is not None
+    assert meta.title == "AI Engineering"
+    assert meta.authors == ["Chip Huyen"]
+
+
+def test_fetch_crossref_survives_gzip_content_encoding():
+    payload = {"message": {"title": ["Gzipped Work"], "DOI": "10.5555/example"}}
+    client = mock_client({"api.crossref.org": _gzip_response(payload)})
+    meta = fetch_crossref("10.5555/example", client=client)
+    assert meta is not None and meta.title == "Gzipped Work"
+
+
+def test_fetch_arxiv_survives_gzip_content_encoding():
+    atom = (
+        '<feed xmlns="http://www.w3.org/2005/Atom">'
+        "<entry><title>Gzipped Paper</title>"
+        "<id>http://arxiv.org/abs/2006.11239</id></entry></feed>"
+    )
+    body = gzip.compress(atom.encode())
+    response = httpx.Response(200, headers={"content-encoding": "gzip"}, content=body)
+    client = mock_client({"export.arxiv.org": response})
+    meta = fetch_arxiv("2006.11239", client=client)
+    assert meta is not None and meta.title == "Gzipped Paper"
 
 
 def test_metadata_redirect_chain_is_followed_and_validated():

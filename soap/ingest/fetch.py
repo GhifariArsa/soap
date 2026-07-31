@@ -464,9 +464,20 @@ def _bounded_get(
                 body = _read_bounded(response, max_bytes)
                 if body is None:
                     return None
+                # ``body`` is what ``iter_bytes()`` yielded, i.e. already
+                # transparently decompressed by httpx.  The provider's
+                # ``Content-Encoding`` (and its now-stale ``Content-Length``)
+                # no longer describe it, so drop both before handing the
+                # headers back to a reconstructed ``Response`` — otherwise
+                # ``httpx.Response.__init__`` re-applies the decoder to plain
+                # bytes and raises ``DecodingError``, which the caller would
+                # swallow as a lookup miss.
+                out_headers = httpx.Headers(response.headers)
+                out_headers.pop("content-encoding", None)
+                out_headers.pop("content-length", None)
                 return httpx.Response(
                     response.status_code,
-                    headers=response.headers,
+                    headers=out_headers,
                     content=body,
                     request=response.request,
                     extensions=response.extensions,

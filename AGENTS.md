@@ -8,8 +8,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 - **Disk is the source of truth.** Every mutation rewrites `documents/<id>/info.yaml`
   first, then re-syncs the SQLite index (rebuildable). Write through the helpers in
-  `soap/library.py` (`save_document`, `set_review_status`, `edit_document`,
-  `delete_document`), never the DB directly.
+  `soap/library.py` (`save_document`, `set_review_status`, `set_read_status`,
+  `edit_document`, `delete_document`), never the DB directly.
 - **Link adds download the PDF.** A URL/bare-arXiv-id add resolves metadata *and*
   best-effort downloads the paper's PDF (`soap/ingest/download.py:download_pdf`,
   driven from `soap/ingest/url.py:resolve_url(download=...)`): arXiv's canonical

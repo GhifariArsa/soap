@@ -670,6 +670,19 @@ def set_review_status(
     return document
 
 
+def set_read_status(
+    library: "Library",
+    doc_id: str,
+    status: str,
+    docs: DocumentService,
+) -> Document:
+    """Set a document's reading state on disk, then rebuild its index row."""
+    document = load_document(library, doc_id)
+    document.read_status = status
+    save_document(library, document, docs)
+    return document
+
+
 def edit_document(
     library: "Library",
     doc_id: str,

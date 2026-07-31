@@ -48,7 +48,7 @@ success:    "#57c08a"   # filed / read / high confidence
 warning:    "#e0a54a"
 error:      "#e0685f"   # low confidence / errors
 foreground: "#e6e9ee"
-background: "#0d1117"   # base for derived colors; the app root is transparent so your terminal shows through
+background: "#0d1117"   # base for derived colors; the app root defers to your terminal's own background, so it shows through
 surface:    "#161b22"   # top bar / footer
 panel:      "#1a2130"   # panes / cards
 

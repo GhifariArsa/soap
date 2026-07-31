@@ -5,7 +5,7 @@ import yaml
 
 from soap.db.documents import DocumentService
 from soap.ingest.merge import Overrides
-from soap.library import add
+from soap.library import add, load_document
 from soap.models.document import Document
 
 from tests.conftest import mock_client
@@ -356,6 +356,33 @@ def test_doi_url_then_upgrade(library, make_pdf):
     with DocumentService.open(library.db_path) as docs:
         assert docs.has_file(meta_only.citekey)
         assert _doc_row(library, meta_only.citekey)[5] == "filed"
+    upgraded_doc = load_document(library, meta_only.citekey)
+    assert upgraded_doc.review_status == "filed"
+    assert [ref.path for ref in upgraded_doc.files] == [
+        f"documents/{meta_only.citekey}/found.pdf"
+    ]
+
+
+def test_arxiv_metadata_only_then_upgrade_updates_disk_and_index(library, make_pdf):
+    meta_only = add(
+        library, "https://arxiv.org/abs/2006.11239v2", client=_arxiv_client()
+    )
+    pdf = make_pdf("found-arxiv.pdf")
+    upgrade = add(
+        library, str(pdf), overrides=Overrides(arxiv_id="2006.11239v2"),
+        fetch=False,
+    )
+
+    assert upgrade.status == "upgraded"
+    assert upgrade.document.review_status == "filed"
+    on_disk = load_document(library, meta_only.citekey)
+    assert on_disk.files[0].path == (
+        f"documents/{meta_only.citekey}/found-arxiv.pdf"
+    )
+    with DocumentService.open(library.db_path) as docs:
+        indexed = docs.get_document(meta_only.citekey)
+    assert indexed.files == on_disk.files
+    assert indexed.review_status == on_disk.review_status == "filed"
 
 
 # Unrecognised URL -> metadata-only with URL as title -----------------------

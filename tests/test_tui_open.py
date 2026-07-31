@@ -38,6 +38,25 @@ def test_open_prefers_first_attached_local_file(library, monkeypatch):
     assert launched == [local]
 
 
+def test_open_rejects_file_reference_symlink_escape(library, tmp_path, monkeypatch):
+    outside = tmp_path / "outside.pdf"
+    outside.write_bytes(b"outside")
+    (library.path / "redirect.pdf").symlink_to(outside)
+    doc = Document(
+        id="paper", title="Paper", files=[FileRef(path="redirect.pdf")]
+    )
+    app = _app(library, doc)
+    launched = []
+    warnings = []
+    monkeypatch.setattr(app, "_launch", launched.append)
+    monkeypatch.setattr(app, "notify", lambda message, **kwargs: warnings.append(message))
+
+    app.action_open()
+
+    assert launched == []
+    assert warnings and "unsafe file reference" in warnings[0]
+
+
 def test_open_falls_back_to_document_url_without_file(library, monkeypatch):
     url = "https://arxiv.org/abs/1234.5678"
     doc = Document(id="paper", title="Paper", url=url)

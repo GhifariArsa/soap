@@ -27,7 +27,12 @@ from textual.widgets import DataTable, Input, ListView, Static
 
 from soap.config import load_config, save_theme
 from soap.db.documents import DocumentService
-from soap.library import Library, edit_document, set_read_status
+from soap.library import (
+    Library,
+    edit_document,
+    resolve_file_ref_path,
+    set_read_status,
+)
 from soap.models.document import ReadStatus
 from soap.tui._markup import key, sep
 from soap.tui.review import ReviewScreen
@@ -379,7 +384,11 @@ class SoapApp(App):
         if doc is None:
             return
         if doc.files:
-            target = self.library.path / doc.files[0].path
+            try:
+                target = resolve_file_ref_path(self.library, doc.id, doc.files[0])
+            except (OSError, ValueError) as exc:
+                self.notify(f"unsafe file reference: {exc}", severity="error")
+                return
             if not target.exists():
                 self.notify(f"file missing on disk: {target}", severity="error")
                 return

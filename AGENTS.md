@@ -22,8 +22,25 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   action, the TUI review form, and `soap add --confirm`.
 - **`always_review: true`** is the shipped default (`soap/cli/init.py`), so the review
   queue is the primary add path — weight review UX accordingly.
+- **TUI is view-only over theme tokens.** The "Aqua Slate" redesign lives entirely in
+  the view layer: `soap/tui/themes.py` (palettes), `app.tcss` (structure/borders),
+  `soap/tui/widgets.py` + `widgets_detail.py` (list `DataTable` + detail), and
+  `soap/tui/review.py`. Widgets emit theme slots (`$primary`/`$accent`/`$success`/…)
+  and shared markup helpers (`soap/tui/_markup.py`: `sep`/`key`/`confidence_meter`),
+  **never hardcoded hex** — so a theme change reskins everything. `sep()` also fixes
+  Textual's span-boundary whitespace stripping (the old `sourcearxiv`/`movej/k` mash);
+  use it for every `label<space>value`. The list feed adds display-only columns to
+  `DocumentService.list_documents` (venue/read_status/author summary) — read-only, no
+  schema change. Regenerate the reference screenshots with
+  `uv run python scripts/shoot_tui.py` (writes SVGs to `docs/screens/`).
+- **Themes are user-extensible** (`soap/tui/themes.py`). `BUNDLED_THEMES` ships
+  aqua-slate (default) + one-dark + catppuccin-mocha; `load_user_themes` discovers
+  `$SOAP_DIR/themes/*.yaml` (YAML, matching `soap/config.py`) and degrades gracefully
+  on a broken file (skip + warn, never crash). The startup theme is the `theme:` key
+  in `config.yaml`; `SoapApp` persists any runtime switch back via
+  `soap.config.save_theme`. Format + example: `docs/themes.md`, `docs/example-theme.yaml`.
 - **Testing:** `uv run pytest`. TUI is covered with Textual's pilot via `asyncio.run`
-  (`tests/test_tui_review.py`) — no pytest-asyncio plugin.
+  (`tests/test_tui_review.py`, `tests/test_themes.py`) — no pytest-asyncio plugin.
 
 ## Maintaining this file
 

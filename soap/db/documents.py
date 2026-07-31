@@ -23,9 +23,12 @@ from soap.models.document import Document, FileRef
 class DocumentRow:
     """A lightweight document row for list rendering — no linked tables joined.
 
-    The TUI draws hundreds of these, so it deliberately avoids hydrating authors
-    / tags / files for every row. Full hydration happens only for the selected
-    document via :meth:`DocumentService.get_document`.
+    The TUI's ``DataTable`` draws these with status · Title · Authors · Venue ·
+    Year columns, so alongside the core scalar columns it carries just enough to
+    render authors (the first two author names + a total count, resolved by two
+    cheap correlated subqueries) without fully hydrating each row. Full hydration
+    still happens only for the selected document via
+    :meth:`DocumentService.get_document`.
     """
 
     id: str
@@ -33,6 +36,10 @@ class DocumentRow:
     year: int | None
     review_status: str
     source: str
+    venue: str | None = None
+    read_status: str = "unread"
+    lead_authors: str | None = None  # up to the first two names, "; "-joined
+    author_count: int = 0
 
 
 class DocumentService:
@@ -120,6 +127,9 @@ class DocumentService:
             "toread": one(
                 "SELECT COUNT(*) FROM documents WHERE read_status = 'unread'"
             ),
+            "reading": one(
+                "SELECT COUNT(*) FROM documents WHERE read_status = 'reading'"
+            ),
         }
 
     def inbox_count(self) -> int:
@@ -153,10 +163,10 @@ class DocumentService:
     ) -> list[DocumentRow]:
         """Rows matching a sidebar filter, optionally narrowed by search text.
 
-        ``filter_kind`` is one of ``all``/``inbox``/``toread``/``tag``/
-        ``collection``; ``filter_value`` names the tag or collection. ``search``
-        is a case-insensitive substring matched across title, venue, author
-        names, and tags. Filter and search combine with AND.
+        ``filter_kind`` is one of ``all``/``inbox``/``toread``/``reading``/
+        ``tag``/``collection``; ``filter_value`` names the tag or collection.
+        ``search`` is a case-insensitive substring matched across title, venue,
+        author names, and tags. Filter and search combine with AND.
         """
         where: list[str] = []
         params: list[object] = []
@@ -165,6 +175,8 @@ class DocumentService:
             where.append("d.review_status = 'needs_review'")
         elif filter_kind == "toread":
             where.append("d.read_status = 'unread'")
+        elif filter_kind == "reading":
+            where.append("d.read_status = 'reading'")
         elif filter_kind == "tag":
             where.append(
                 "EXISTS (SELECT 1 FROM document_tags dt JOIN tags t "
@@ -191,8 +203,18 @@ class DocumentService:
             params.extend([q, q, q, q])
 
         clause = (" WHERE " + " AND ".join(where)) if where else ""
+        # The two correlated subqueries give the row its author summary cheaply:
+        # the first two author names (position-ordered) and the total count, so
+        # the view can render "Lead +N" / "A, B" without hydrating every row.
         rows = self.conn.execute(
-            "SELECT d.id, d.title, d.year, d.review_status, d.source "
+            "SELECT d.id, d.title, d.year, d.review_status, d.source, "
+            "d.venue, d.read_status, "
+            "(SELECT group_concat(name, '; ') FROM ("
+            "  SELECT a.name FROM authors a JOIN document_authors da "
+            "  ON da.author_id = a.id WHERE da.document_id = d.id "
+            "  ORDER BY da.position LIMIT 2)) AS lead_authors, "
+            "(SELECT COUNT(*) FROM document_authors da2 "
+            " WHERE da2.document_id = d.id) AS author_count "
             f"FROM documents d{clause} ORDER BY d.title COLLATE NOCASE",
             params,
         ).fetchall()

@@ -37,6 +37,18 @@ from soap.library import (
     save_document,
 )
 from soap.models.document import Document, ReviewStatus
+from soap.tui._markup import confidence_meter, key, sep
+
+# In-card action legend — only wired verbs; `file` in green, `done` muted.
+_LEGEND = sep(2).join(
+    [
+        key("enter / a", "file", "$success"),
+        key("c", "correct"),
+        key("e", "$EDITOR"),
+        key("s", "skip"),
+        key("q", "done", "$text-muted"),
+    ]
+)
 
 
 class ReviewScreen(ModalScreen[tuple[int, int]]):
@@ -70,6 +82,7 @@ class ReviewScreen(ModalScreen[tuple[int, int]]):
             with Center():
                 with Vertical(id="review-card"):
                     yield Static("", id="review-progress")
+                    yield Static("", id="review-meter")
                     for field in CORE_REVIEW_FIELDS:
                         with Horizontal(classes="field-row"):
                             yield Static(field, classes="field-label")
@@ -84,13 +97,10 @@ class ReviewScreen(ModalScreen[tuple[int, int]]):
                                 placeholder=placeholder,
                             )
                     yield Static("", id="review-facts")
-                    yield Static(
-                        "[$text-muted]⏎/a file · c/tab correct · "
-                        "e $EDITOR · s skip · q done[/]",
-                        id="review-hint",
-                    )
+                    yield Static(_LEGEND, id="review-hint")
 
     def on_mount(self) -> None:
+        self.query_one("#review-card").border_title = "⚑  REVIEW INBOX"
         self._render_current()
         # Start in command mode (nothing focused) so a/e/s/q act immediately; the
         # reviewer taps c or tab to edit a field. Deferred past the refresh so it
@@ -114,9 +124,27 @@ class ReviewScreen(ModalScreen[tuple[int, int]]):
             self._render_current()
             return
 
+        total = len(self.queue)
+        dots = []
+        for i in range(total):
+            if i < self.pos:
+                dots.append("[b $primary]●[/]")
+            elif i == self.pos:
+                dots.append("[b $accent]●[/]")
+            else:
+                dots.append("[$text-muted]○[/]")
         self.query_one("#review-progress", Static).update(
-            f"[$accent]REVIEW[/]  [$text-muted]{self.pos + 1}/{len(self.queue)}[/]"
+            "".join(dots)
+            + sep(2)
+            + "[$text-muted]reviewing document[/]"
+            + sep(1)
+            + f"[b $foreground]{self.pos + 1}[/]"
+            + sep(1)
+            + "[$text-muted]of[/]"
+            + sep(1)
+            + f"[b $foreground]{total}[/]"
         )
+        self._render_meter(doc)
 
         # Prefill each editable field with the detected value.
         self.query_one("#f-title", Input).value = doc.title or ""
@@ -125,12 +153,43 @@ class ReviewScreen(ModalScreen[tuple[int, int]]):
         self.query_one("#f-type", Input).value = doc.type or ""
         self.query_one("#f-venue", Input).value = doc.venue or ""
 
-        conf = f" · confidence {doc.confidence:.2f}" if doc.confidence is not None else ""
         attach = escape(doc.files[0].path.rsplit("/", 1)[-1]) if doc.files else "none"
         self.query_one("#review-facts", Static).update(
-            f"[$text-muted]source[/] {escape(doc.source)}{conf}   "
-            f"[$text-muted]file[/] {attach}"
+            "[$text-muted]source[/]"
+            + sep(1)
+            + f"[$secondary]{escape(doc.source)}[/]"
+            + sep(2)
+            + "[$text-muted]·[/]"
+            + sep(2)
+            + "[$text-muted]file[/]"
+            + sep(1)
+            + f"[$foreground]{attach}[/]"
+            + sep(2)
+            + "[$text-muted]·[/]"
+            + sep(2)
+            + "[$text-muted]citekey[/]"
+            + sep(1)
+            + f"[$foreground]{escape(doc.id)}[/]"
         )
+
+    def _render_meter(self, doc: Document) -> None:
+        meter = self.query_one("#review-meter", Static)
+        if doc.confidence is None:
+            meter.update("[$text-muted]confidence[/]" + sep(1) + "[$text-muted]—[/]")
+            return
+        band, color, bar = confidence_meter(doc.confidence)
+        line = (
+            "[$text-muted]confidence[/]"
+            + sep(1)
+            + f"[b {color}]{doc.confidence:.2f}[/]"
+            + sep(2)
+            + bar
+            + sep(2)
+            + f"[{color}]{band}[/]"
+        )
+        if band == "low":
+            line += sep(2) + "[$error]⚠ low — check carefully[/]"
+        meter.update(line)
 
     # -- form <-> model ----------------------------------------------------
 

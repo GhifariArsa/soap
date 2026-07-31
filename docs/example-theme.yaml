@@ -1,0 +1,35 @@
+# Example soap TUI theme.
+#
+# Drop a copy of this file into  $SOAP_DIR/themes/  (any *.yaml / *.yml name) and
+# soap discovers it on launch: it appears in the Ctrl-P command palette's theme
+# picker and the Ctrl-T cycle. Select it once and it is remembered across
+# restarts (persisted as `theme:` in config.yaml). Set it as the startup theme
+# directly by adding `theme: solarized-lite` to config.yaml.
+#
+# Only `name` is required. Every color is optional — anything you omit falls back
+# to the Aqua Slate default, so a few overrides are enough to get started. A
+# broken or partial file is skipped with a warning; it never stops the app.
+
+name: solarized-lite        # required — how the theme is listed
+dark: false                 # optional — light vs dark (default: true)
+
+# Role → color. Two accents with distinct jobs:
+#   primary   = focus ring / selection / active-pane border / brand  (teal in Aqua Slate)
+#   accent    = attention only: inbox, needs-review, medium confidence (amber)
+primary:    "#268bd2"       # blue
+secondary:  "#2aa198"       # cyan — identifiers (year, arXiv/DOI)
+accent:     "#b58900"       # amber — attention
+success:    "#859900"       # green — filed / read / high confidence
+warning:    "#b58900"
+error:      "#dc322f"       # red — low confidence / errors
+foreground: "#586e75"       # primary text
+background: "#fdf6e3"        # app background
+surface:    "#eee8d5"        # top bar / footer
+panel:      "#eee8d5"        # panes / cards
+
+# Optional: fine-tune custom variables. `text-muted` and `border` are the two the
+# app leans on most (quiet secondary text, quiet pane borders); everything else
+# Textual derives from the roles above.
+variables:
+  text-muted: "#93a1a1"
+  border:     "#d8d0bd"

@@ -31,9 +31,15 @@ class Config:
     ``always_review`` — when true, every ``add`` is forced into the
     ``needs_review`` queue regardless of confidence or source. Defaults to
     ``false`` so a missing/empty config leaves ingestion behavior unchanged.
+
+    ``theme`` — name of the TUI theme selected at startup. ``None`` means "use
+    the shipped default". The value is a theme name (bundled, e.g. ``aqua-slate``,
+    or a user theme discovered in ``$SOAP_DIR/themes/``); an unknown name simply
+    falls back to the default when the app resolves it.
     """
 
     always_review: bool = False
+    theme: str | None = None
 
 
 def config_path(soap_dir: Path) -> Path:
@@ -58,4 +64,33 @@ def load_config(soap_dir: Path) -> Config:
         return Config()
     if not isinstance(data, dict):
         return Config()
-    return Config(always_review=bool(data.get("always_review", False)))
+    theme = data.get("theme")
+    theme_name = str(theme).strip() if isinstance(theme, str) and theme.strip() else None
+    return Config(
+        always_review=bool(data.get("always_review", False)),
+        theme=theme_name,
+    )
+
+
+def save_theme(soap_dir: Path, theme_name: str) -> None:
+    """Persist the chosen TUI ``theme`` into ``config.yaml``, best-effort.
+
+    Rewrites (or appends) only the top-level ``theme:`` line, leaving other keys
+    and comments intact. Any I/O error is swallowed — a library on a read-only
+    disk still runs; it just won't remember the theme across restarts.
+    """
+    path = config_path(soap_dir)
+    try:
+        text = path.read_text() if path.exists() else ""
+    except OSError:
+        text = ""
+    kept = [
+        line
+        for line in text.splitlines()
+        if not line.lstrip().startswith("theme:")
+    ]
+    kept.append(f"theme: {theme_name}")
+    try:
+        path.write_text("\n".join(kept) + "\n")
+    except OSError:
+        pass

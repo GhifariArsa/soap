@@ -1,12 +1,13 @@
-/* Structural layout for the soap TUI. Colors come from the active theme
-   ($background/$surface/$panel/$primary/$accent) and the custom $text-muted var, so
-   switching themes reskins everything without touching this file. */
+/* Structural layout + polish for the soap TUI. All colors come from the active
+   theme ($background/$surface/$panel/$primary/$accent/$border/$text-muted…), so
+   switching themes reskins everything without touching this file. The Aqua Slate
+   system: quiet $border on every pane, teal $primary on the focused one. */
 
 Screen {
     background: $background;
 }
 
-/* --- top bar: logo + search ------------------------------------------- */
+/* --- top bar: brand + search + inbox pill ----------------------------- */
 
 #topbar {
     height: 3;
@@ -18,7 +19,7 @@ Screen {
 #logo {
     width: auto;
     height: 1;
-    color: $accent;
+    color: $primary;
     text-style: bold;
     padding: 0 3 0 0;
 }
@@ -29,52 +30,94 @@ Screen {
     border: none;
     padding: 0;
     background: $surface;
-    color: $foreground;
+    color: $text-muted;
 }
 #search:focus {
     background: $panel;
+    color: $foreground;
 }
 
-/* --- inbox bar (hidden when the inbox is empty) ----------------------- */
-
-#inboxbar {
+#inboxpill {
+    width: auto;
     height: 1;
-    background: $surface;
+    padding: 0 2;
+    background: $accent 15%;
     color: $accent;
     text-style: bold;
-    padding: 0 2;
 }
 
 /* --- three-pane body -------------------------------------------------- */
 
 #body {
     height: 1fr;
+    padding: 1 1 0 1;
 }
 
 #sidebar {
-    width: 24;
-    min-width: 20;
+    width: 26;
+    min-width: 22;
     background: $panel;
-    padding: 1 1;
-    border-right: solid $background;
+    border: round $border;
+    border-title-color: $text-muted;
+    border-title-align: left;
+    padding: 0 1;
+    margin: 0 1 0 0;
+}
+#sidebar:focus, #sidebar:focus-within {
+    border: round $primary;
+    border-title-color: $primary;
 }
 
 #doclist {
     width: 3fr;
-    background: $background;
-    padding: 1 1;
+    background: $panel;
+    border: round $border;
+    border-title-color: $text-muted;
+    border-title-align: left;
+    padding: 0 1;
+    margin: 0 1 0 0;
+    scrollbar-size: 0 0;
+}
+#doclist:focus {
+    border: round $primary;
+    border-title-color: $primary;
 }
 
 #detail {
     width: 2fr;
-    min-width: 30;
+    min-width: 32;
     background: $panel;
-    padding: 1 2;
-    border-left: solid $background;
+    border: round $border;
+    border-title-color: $text-muted;
+    border-title-align: left;
+    padding: 0 2;
+}
+#detail:focus, #detail:focus-within {
+    border: round $primary;
+    border-title-color: $primary;
 }
 
 #detail-body {
     width: 1fr;
+}
+
+/* --- document table --------------------------------------------------- */
+
+DataTable > .datatable--header {
+    text-style: bold;
+    color: $text-muted;
+    background: $panel;
+}
+DataTable > .datatable--cursor {
+    background: $primary 30%;
+    color: $foreground;
+    text-style: bold;
+}
+DataTable > .datatable--even-row {
+    background: $panel;
+}
+DataTable > .datatable--odd-row {
+    background: $boost;
 }
 
 /* --- sidebar rows ----------------------------------------------------- */
@@ -93,6 +136,11 @@ Screen {
     height: 1;
     padding: 0 1;
 }
+.side-row.attention .side-label,
+.side-row.attention .side-count {
+    color: $accent;
+    text-style: bold;
+}
 .side-label {
     width: 1fr;
 }
@@ -101,20 +149,14 @@ Screen {
     color: $text-muted;
 }
 
-/* --- document rows ---------------------------------------------------- */
+/* --- persistent cheat-bar footer -------------------------------------- */
 
-.doc-row {
-    layout: horizontal;
+#cheatbar {
+    dock: bottom;
     height: 1;
-    padding: 0 1;
-}
-.doc-title {
-    width: 1fr;
-}
-.doc-year {
-    width: 6;
-    text-align: right;
+    background: $surface;
     color: $text-muted;
+    padding: 0 2;
 }
 
 /* --- modals: review, help, empty-library ------------------------------ */
@@ -125,37 +167,75 @@ ReviewScreen, HelpScreen {
 }
 
 #review-card, #help-card, #empty-card {
-    width: 72;
+    width: 74;
     max-width: 90%;
-    background: $surface;
+    height: auto;
+    background: $panel;
     border: round $primary;
+    border-title-color: $primary;
+    border-title-align: left;
     padding: 1 3;
 }
 
 #review-progress {
-    padding: 0 0 1 0;
+    height: 1;
 }
-#review-hint {
-    padding: 1 0 0 0;
+#review-meter {
+    height: auto;
+    padding: 0 0 1 0;
 }
 .field-row {
     height: 3;
 }
 .field-label {
-    width: 10;
+    width: 9;
     padding: 1 1 0 0;
     text-align: right;
     color: $text-muted;
 }
 .field-input {
     width: 1fr;
+    height: 3;
+    background: $background;
+    border: tall $border;
+    padding: 0 1;
+    color: $foreground;
+}
+.field-input:focus {
+    border: tall $primary;
+    background: $surface;
 }
 #review-facts {
     padding: 1 0 0 0;
     color: $text-muted;
 }
+#review-hint {
+    height: auto;
+    margin: 1 0 0 0;
+    border-top: solid $border;
+    padding: 1 0 0 0;
+}
+
+/* --- help cheat sheet -------------------------------------------------- */
+
+#help-card {
+    width: 92;
+}
+#help-cols {
+    height: auto;
+}
+.help-col {
+    width: 1fr;
+    height: auto;
+    padding: 0 2 0 0;
+}
+#help-hint {
+    padding: 1 0 0 0;
+}
+
 #empty-card {
     border: round $accent;
+    border-title-color: $accent;
     content-align: center middle;
     padding: 2 4;
 }

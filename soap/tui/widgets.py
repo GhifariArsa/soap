@@ -1,19 +1,30 @@
-"""The panes that make up the browser: sidebar, document list, detail.
+"""The panes that make up the browser: sidebar, document table, detail.
 
-Each is a thin view over data the app hands it. The two lists subclass a common
-``VimList`` so ``j``/``k``/``g``/``G``/half-page motions work identically. None
-of these widgets touch the database — the app owns the ``DocumentService`` and
-pushes rows/documents in.
+Each is a thin view over data the app hands it. The sidebar is a ``ListView``
+with vim motions; the document list is a columned ``DataTable`` (status glyph ·
+Title · Authors · Venue · Year) with a full-row teal cursor. None of these
+widgets touch the database — the app owns the ``DocumentService`` and pushes
+rows/documents in. Colors are resolved from the active theme at render time, so
+switching themes reskins every cell.
 """
 
-from rich.markup import escape
+from rich.text import Text
 
 from textual.binding import Binding
-from textual.containers import VerticalScroll
-from textual.widgets import Label, ListItem, ListView, Static
+from textual.widgets import DataTable, Label, ListItem, ListView
 
 from soap.db.documents import DocumentRow
-from soap.models.document import Document, ReviewStatus
+from soap.models.document import ReadStatus, ReviewStatus
+from soap.tui.widgets_detail import DetailPane  # noqa: F401  (re-export)
+
+# Status glyphs: "where my cursor is" (the teal row cursor) never shares a color
+# with "what state a row is in" (these glyphs) — the fzf fg+/state split.
+_GLYPH = {
+    "needs_review": ("●", "accent"),  # amber — attention
+    "read": ("●", "success"),  # green — done
+    "reading": ("◐", "secondary"),  # blue — in progress
+    "unread": ("○", "text-muted"),  # hollow — to read
+}
 
 
 class VimList(ListView):
@@ -49,35 +60,154 @@ class VimList(ListView):
             self.action_cursor_up()
 
 
-# --- document list --------------------------------------------------------
+# --- document list (DataTable) --------------------------------------------
 
 
-class DocRow(ListItem):
-    """One row in the document list: title (left) + year (right)."""
+def _authors_cell(row: DocumentRow) -> str:
+    """Render an author summary: surname / "A, B" / "Lead +N"."""
+    if not row.author_count or not row.lead_authors:
+        return "—"
+    names = [n.strip() for n in row.lead_authors.split(";") if n.strip()]
+    surnames = [n.split(",")[0].strip() for n in names if n]
+    if not surnames:
+        return "—"
+    if row.author_count == 1:
+        return surnames[0]
+    if row.author_count == 2:
+        return ", ".join(surnames[:2])
+    return f"{surnames[0]} +{row.author_count - 1}"
 
-    def __init__(self, row: DocumentRow) -> None:
-        super().__init__(classes="doc-row")
-        self.row = row
 
-    def compose(self):
-        marker = "◆ " if self.row.review_status == ReviewStatus.NEEDS_REVIEW.value else ""
-        yield Label(f"{marker}{self.row.title}", classes="doc-title")
-        yield Label(str(self.row.year or "—"), classes="doc-year")
+class DocumentList(DataTable):
+    """The middle pane: the filtered documents as a columned table.
 
+    Kept named ``DocumentList`` (was a ``ListView``) so the app's references and
+    the pane id are stable; it is now a row-cursor ``DataTable``.
+    """
 
-class DocumentList(VimList):
-    """The middle pane: the filtered list of documents."""
+    BINDINGS = [
+        Binding("j", "cursor_down", "Down", show=False),
+        Binding("k", "cursor_up", "Up", show=False),
+        Binding("g", "go_top", "Top", show=False),
+        Binding("G", "go_bottom", "Bottom", show=False),
+        Binding("ctrl+d", "half_down", "Half page down", show=False),
+        Binding("ctrl+u", "half_up", "Half page up", show=False),
+    ]
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(
+            *args, cursor_type="row", zebra_stripes=True, cell_padding=0, **kwargs
+        )
+        self._ids: list[str] = []
+
+    # Fixed non-title column widths; Title flexes to fill the rest. cell_padding
+    # is 0 (see __init__) so a 1-col gutter is baked into each cell's text; that
+    # buys back the ~10 columns default padding would cost and lets all five
+    # columns fit the list pane at typical widths.
+    _OTHER_COLS = 1 + 14 + 9 + 6
+
+    def on_mount(self) -> None:
+        self.add_column(" ", key="status", width=1)
+        self.add_column(" Title", key="title", width=34)
+        self.add_column(" Authors", key="authors", width=14)
+        self.add_column(" Venue", key="venue", width=9)
+        self.add_column(Text("Year ", justify="right"), key="year", width=6)
+
+    def on_resize(self) -> None:
+        self._fit_title()
+
+    def _fit_title(self) -> None:
+        """Grow/shrink the Title column to fill the laid-out pane width."""
+        if "title" not in self.columns:
+            return
+        content_w = self.content_size.width or self.size.width
+        if content_w <= 0:
+            return
+        # Reserve the other columns plus DataTable's per-column cell padding
+        # (1 each side) and a little slack so the right-most Year column always
+        # lands inside the pane rather than scrolling off the edge.
+        reserve = self._OTHER_COLS + 3
+        self.columns["title"].width = max(18, content_w - reserve)
+        self._require_update_dimensions = True
+        self.refresh()
+
+    # -- theme-aware colors -------------------------------------------------
+
+    def _color(self, token: str) -> str:
+        """Resolve a theme variable (e.g. 'accent') to a concrete color."""
+        try:
+            return self.app.theme_variables.get(token, "#ffffff")
+        except Exception:  # noqa: BLE001 - defensive; never break a row render
+            return "#ffffff"
+
+    # -- population ---------------------------------------------------------
 
     def populate(self, rows: list[DocumentRow]) -> None:
         self.clear()
-        self.extend(DocRow(r) for r in rows)
-        if rows:
-            self.index = 0
+        self._ids = []
+        muted = self._color("text-muted")
+        fg = self._color("foreground")
+        year_c = self._color("secondary")
+        for row in rows:
+            glyph, gtoken = _GLYPH.get(
+                row.review_status
+                if row.review_status == ReviewStatus.NEEDS_REVIEW.value
+                else row.read_status,
+                _GLYPH["unread"],
+            )
+            gtxt = Text(glyph, style=self._color(gtoken))
+            attention = (
+                row.review_status == ReviewStatus.NEEDS_REVIEW.value
+                or row.read_status == ReadStatus.UNREAD.value
+            )
+            ttxt = Text(
+                " " + (row.title or "—"),
+                style=(f"bold {fg}" if attention else muted),
+                no_wrap=True,
+                overflow="ellipsis",
+            )
+            atxt = Text(
+                " " + _authors_cell(row), style=muted, no_wrap=True, overflow="ellipsis"
+            )
+            vtxt = Text(
+                " " + (row.venue or "—"), style=muted, no_wrap=True, overflow="ellipsis"
+            )
+            ytxt = Text(
+                (str(row.year) if row.year else "—") + " ",
+                style=year_c,
+                justify="right",
+            )
+            self.add_row(gtxt, ttxt, atxt, vtxt, ytxt, key=row.id, height=1)
+            self._ids.append(row.id)
+        if self._ids:
+            self.move_cursor(row=0)
+        self.call_after_refresh(self._fit_title)
 
     @property
     def current_id(self) -> str | None:
-        child = self.highlighted_child
-        return child.row.id if isinstance(child, DocRow) else None
+        idx = self.cursor_row
+        if 0 <= idx < len(self._ids):
+            return self._ids[idx]
+        return None
+
+    # -- vim motions --------------------------------------------------------
+
+    def action_go_top(self) -> None:
+        if self.row_count:
+            self.move_cursor(row=0)
+
+    def action_go_bottom(self) -> None:
+        if self.row_count:
+            self.move_cursor(row=self.row_count - 1)
+
+    def _half(self) -> int:
+        return max(1, self.size.height // 2)
+
+    def action_half_down(self) -> None:
+        self.move_cursor(row=min(self.row_count - 1, self.cursor_row + self._half()))
+
+    def action_half_up(self) -> None:
+        self.move_cursor(row=max(0, self.cursor_row - self._half()))
 
 
 # --- sidebar --------------------------------------------------------------
@@ -95,9 +225,16 @@ class SidebarRow(ListItem):
     """A selectable filter: a library view, a tag, or a collection."""
 
     def __init__(
-        self, kind: str, value: str | None, label: str, count: int | None = None
+        self,
+        kind: str,
+        value: str | None,
+        label: str,
+        count: int | None = None,
+        *,
+        attention: bool = False,
     ) -> None:
-        super().__init__(classes="side-row")
+        classes = "side-row attention" if attention else "side-row"
+        super().__init__(classes=classes)
         self.kind = kind
         self.value = value
         self._label = label
@@ -121,14 +258,17 @@ class Sidebar(VimList):
         self.clear()
         items: list[ListItem] = [
             SidebarHeader("LIBRARY"),
-            SidebarRow("all", None, "▸ All", counts["all"]),
-            SidebarRow("inbox", None, "▸ Inbox", counts["inbox"]),
-            SidebarRow("toread", None, "▸ To read", counts["toread"]),
+            SidebarRow("all", None, "All", counts["all"]),
+            SidebarRow(
+                "inbox", None, "⚑ Inbox", counts["inbox"], attention=counts["inbox"] > 0
+            ),
+            SidebarRow("toread", None, "To read", counts["toread"]),
+            SidebarRow("reading", None, "Reading", counts.get("reading", 0)),
         ]
         if tags:
             items.append(SidebarHeader("TAGS"))
             items.extend(
-                SidebarRow("tag", name, f"#{name}", n) for name, n in tags
+                SidebarRow("tag", name, f"# {name}", n) for name, n in tags
             )
         if collections:
             items.append(SidebarHeader("COLLECTIONS"))
@@ -138,65 +278,3 @@ class Sidebar(VimList):
         self.extend(items)
         # Highlight "All" (index 1; 0 is the disabled header).
         self.index = 1
-
-
-# --- detail pane ----------------------------------------------------------
-
-
-class DetailPane(VerticalScroll):
-    """The right pane: full metadata for the selected document."""
-
-    BINDINGS = [
-        Binding("j", "scroll_down", "Down", show=False),
-        Binding("k", "scroll_up", "Up", show=False),
-    ]
-
-    def compose(self):
-        yield Static("", id="detail-body")
-
-    def show(self, document: Document | None) -> None:
-        body = self.query_one("#detail-body", Static)
-        if document is None:
-            body.update("[$text-muted]Nothing selected[/]")
-            return
-        body.update(self._to_markup(document))
-
-    def _to_markup(self, doc: Document) -> str:
-        lines: list[str] = [f"[b]{escape(doc.title)}[/b]"]
-
-        if doc.authors:
-            lines.append(f"[$text-muted]{escape(self._authors(doc.authors))}[/]")
-
-        venue_bits = [b for b in (doc.venue, str(doc.year) if doc.year else None) if b]
-        if venue_bits:
-            lines.append(f"[$text-muted]{escape(' · '.join(venue_bits))}[/]")
-
-        if doc.tags:
-            chips = "  ".join(
-                f"[#9cc6ef on #17324e] #{escape(t)} [/]" for t in doc.tags
-            )
-            lines.append("")
-            lines.append(chips)
-
-        if doc.abstract:
-            lines.append("")
-            lines.append("[$text-muted]ABSTRACT[/]")
-            lines.append(escape(doc.abstract))
-
-        lines.append("")
-        if doc.files:
-            for f in doc.files:
-                name = f.path.rsplit("/", 1)[-1]
-                lines.append(f"[$text-muted]\U0001f4ce {escape(name)}[/]")
-        else:
-            lines.append("[$text-muted]no file attached[/]")
-
-        return "\n".join(lines)
-
-    @staticmethod
-    def _authors(authors: list[str]) -> str:
-        if len(authors) == 1:
-            return authors[0]
-        if len(authors) == 2:
-            return f"{authors[0]}, {authors[1]}"
-        return f"{authors[0]} et al."

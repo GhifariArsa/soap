@@ -1,10 +1,16 @@
 """The soap TUI application — a refman-style library browser.
 
-Layout mirrors the mockup: a top bar (logo + search), a conditional inbox bar,
-a three-pane body (sidebar / list / detail), and a footer of keybindings. The
-app owns the single ``DocumentService`` connection for the session; widgets are
-dumb views it feeds. Mutations (review→file) go through the library layer so the
-on-disk ``info.yaml`` stays authoritative.
+Layout mirrors the mockup: a top bar (brand + search + amber inbox pill), a
+three-pane body (sidebar / list / detail) in titled ``round``-bordered panes
+whose focused pane border turns teal, and a persistent cheat-bar footer of the
+wired verbs. The app owns the single ``DocumentService`` connection for the
+session; widgets are dumb views it feeds. Mutations (review→file) go through the
+library layer so the on-disk ``info.yaml`` stays authoritative.
+
+Themes are a first-class subsystem (:mod:`soap.tui.themes`): the app registers
+the bundled themes plus any the user drops in ``$SOAP_DIR/themes/``, honors the
+``theme:`` key from ``config.yaml`` at startup, and persists the choice back
+whenever it changes (``ctrl+t`` cycle or the ``ctrl+p`` palette picker).
 """
 
 import os
@@ -17,13 +23,43 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Center, Horizontal, Middle
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Input, ListView, Static
+from textual.widgets import DataTable, Input, ListView, Static
 
+from soap.config import load_config, save_theme
 from soap.db.documents import DocumentService
 from soap.library import Library
+from soap.tui._markup import key, sep
 from soap.tui.review import ReviewScreen
-from soap.tui.themes import DEFAULT_THEME, THEMES
+from soap.tui.themes import BUNDLED_THEMES, DEFAULT_THEME, load_user_themes
 from soap.tui.widgets import DetailPane, DocumentList, Sidebar, SidebarRow
+
+# Human labels for the list pane's border title, per sidebar filter kind.
+_FILTER_TITLES = {
+    "all": "All documents",
+    "inbox": "Inbox",
+    "toread": "To read",
+    "reading": "Reading",
+}
+
+
+def _cheatbar(inbox: int) -> str:
+    """The persistent footer: wired verbs only, keys teal, review count amber."""
+    review = (
+        key("r", "review", "$accent")
+        + (sep(1) + f"[b $accent]{inbox}[/]" if inbox else "")
+    )
+    return sep(3).join(
+        [
+            key("j/k", "move"),
+            key("enter", "open"),
+            key("/", "find"),
+            review,
+            key("tab", "pane"),
+            key("?", "keys"),
+            key("^p", "palette"),
+            key("q", "quit"),
+        ]
+    )
 
 
 class SearchInput(Input):
@@ -37,26 +73,77 @@ class SearchInput(Input):
 
 
 class HelpScreen(ModalScreen[None]):
-    """A dismissible cheat-sheet of keybindings."""
+    """A dismissible three-column cheat sheet (MOVE / ACT / APP)."""
 
     BINDINGS = [Binding("escape,q,question_mark", "dismiss", "Close", show=True)]
 
-    HELP = """[b]soap — keys[/b]
-
-[$accent]move[/]     j/k  up/down     g/G  top/bottom     ctrl+d/u  half page
-[$accent]panes[/]    h/l  focus left/right     tab  cycle
-[$accent]open[/]     enter or o   open the selected file
-[$accent]search[/]   /    search title/author/tag     esc  clear
-[$accent]review[/]   r    walk the inbox (a file · c correct · e $EDITOR · s skip)
-[$accent]theme[/]    ctrl+t cycle     ctrl+p command palette
-[$accent]other[/]    ctrl+r refresh     ? help     q quit
-
-[$text-muted]a add · b export bibtex — not yet wired[/]"""
+    # Only wired commands appear here (no `a add` / `b export` stubs).
+    _COLS = [
+        (
+            "MOVE",
+            [
+                ("j / k", "down / up"),
+                ("g / G", "top / bottom"),
+                ("^d / ^u", "half page"),
+                ("tab", "cycle panes"),
+                ("h / l", "focus left / right"),
+            ],
+        ),
+        (
+            "ACT",
+            [
+                ("enter / o", "open file"),
+                ("/", "search"),
+                ("r", "review inbox"),
+            ],
+        ),
+        (
+            "APP",
+            [
+                ("?", "this help"),
+                ("^p", "command palette"),
+                ("^t", "cycle theme"),
+                ("^r", "refresh"),
+                ("q", "quit"),
+            ],
+        ),
+    ]
 
     def compose(self) -> ComposeResult:
+        from textual.containers import Vertical
+
         with Middle():
             with Center():
-                yield Static(self.HELP, id="help-card")
+                with Vertical(id="help-card"):
+                    with Horizontal(id="help-cols"):
+                        for head, rows in self._COLS:
+                            body = f"[b $text-muted]{head}[/]\n\n" + "\n".join(
+                                self._row(k, d) for k, d in rows
+                            )
+                            yield Static(body, classes="help-col")
+                    yield Static(
+                        "[$text-muted]press[/]"
+                        + sep(1)
+                        + "[b $primary]?[/]"
+                        + sep(1)
+                        + "[$text-muted]or[/]"
+                        + sep(1)
+                        + "[b $primary]esc[/]"
+                        + sep(1)
+                        + "[$text-muted]to close   ·   type[/]"
+                        + sep(1)
+                        + "[b $primary]^p[/]"
+                        + sep(1)
+                        + "[$text-muted]to search every command by name[/]",
+                        id="help-hint",
+                    )
+
+    def on_mount(self) -> None:
+        self.query_one("#help-card").border_title = "◆  soap — keyboard reference"
+
+    @staticmethod
+    def _row(k: str, desc: str) -> str:
+        return f"[b $primary]{k}[/]" + sep(max(1, 12 - len(k))) + f"[$foreground]{desc}[/]"
 
 
 class SoapApp(App):
@@ -67,14 +154,13 @@ class SoapApp(App):
     PANES = ("#sidebar", "#doclist", "#detail")
 
     BINDINGS = [
-        Binding("o", "open", "open", show=True),
+        Binding("o", "open", "open", show=False),
         Binding("enter", "open", "open", show=False),
-        Binding("a", "add", "add", show=True),
-        Binding("slash", "search", "search", show=True, key_display="/"),
-        Binding("f", "filter", "filter", show=True),
-        Binding("r", "review", "review inbox", show=True),
-        Binding("b", "export", "export bibtex", show=True),
-        Binding("question_mark", "help", "help", show=True, key_display="?"),
+        Binding("slash", "search", "search", show=False, key_display="/"),
+        Binding("r", "review", "review inbox", show=False),
+        Binding("question_mark", "help", "help", show=False, key_display="?"),
+        Binding("tab", "focus_pane(1)", "Next pane", show=False),
+        Binding("shift+tab", "focus_pane(-1)", "Prev pane", show=False),
         Binding("l", "focus_pane(1)", "Focus right", show=False),
         Binding("h", "focus_pane(-1)", "Focus left", show=False),
         Binding("ctrl+r", "refresh_data", "refresh", show=False),
@@ -85,10 +171,12 @@ class SoapApp(App):
     def __init__(self, library: Library) -> None:
         super().__init__()
         self.library = library
+        self.config = load_config(library.path)
         self.docs: DocumentService | None = None
         self.filter_kind = "all"
         self.filter_value: str | None = None
         self.search_term = ""
+        self._inbox = 0
         self._initialized = library.is_initialized
 
     # -- construction ------------------------------------------------------
@@ -103,32 +191,51 @@ class SoapApp(App):
                         "then launch [/][$accent]soap[/][$text-muted] again.[/]",
                         id="empty-card",
                     )
-            yield Footer()
+            yield Static("", id="cheatbar")
             return
 
         with Horizontal(id="topbar"):
-            yield Static("\U0001f4da  soap", id="logo")
+            yield Static("◆  soap", id="logo")
             yield SearchInput(
-                placeholder="/  search title, author, tag…", id="search"
+                placeholder="/  search title, author, tag, doi…", id="search"
             )
-        yield Static("", id="inboxbar")
+            yield Static("", id="inboxpill")
         with Horizontal(id="body"):
             yield Sidebar(id="sidebar")
             yield DocumentList(id="doclist")
             yield DetailPane(id="detail")
-        yield Footer()
+        yield Static("", id="cheatbar")
 
     def on_mount(self) -> None:
-        for theme in THEMES:
-            self.register_theme(theme)
-        self.theme = DEFAULT_THEME
+        self._register_themes()
         if not self._initialized:
             return
+        self.query_one("#sidebar").border_title = "BROWSE"
+        self.query_one("#detail").border_title = "DETAIL"
         self.docs = DocumentService.open(self.library.db_path)
         self.refresh_data()
         # Focus the list, not the search box (which is first in DOM order), so
         # j/k browse immediately and the footer shows the full command set.
         self.query_one(DocumentList).focus()
+
+    def _register_themes(self) -> None:
+        """Register bundled + user themes and select the startup theme."""
+        for theme in BUNDLED_THEMES:
+            self.register_theme(theme)
+        user_themes, warnings = load_user_themes(self.library.path)
+        for theme in user_themes:
+            self.register_theme(theme)
+
+        wanted = self.config.theme
+        self.theme = wanted if wanted in self.available_themes else DEFAULT_THEME
+        # Persist any later change (ctrl+t or the ctrl+p palette picker).
+        self.watch(self, "theme", self._persist_theme, init=False)
+
+        for warning in warnings:
+            self.notify(f"theme: {warning}", severity="warning", timeout=8)
+
+    def _persist_theme(self, theme_name: str) -> None:
+        save_theme(self.library.path, theme_name)
 
     def on_unmount(self) -> None:
         if self.docs is not None:
@@ -137,24 +244,29 @@ class SoapApp(App):
     # -- data flow ---------------------------------------------------------
 
     def refresh_data(self) -> None:
-        """Rebuild sidebar + inbox bar + list from the database."""
+        """Rebuild sidebar + inbox pill + footer + list from the database."""
         if self.docs is None:
             return
         counts = self.docs.library_counts()
         self.query_one(Sidebar).build(
             counts, self.docs.tag_counts(), self.docs.collection_counts()
         )
-        self._update_inbox_bar(counts["inbox"])
+        self._inbox = counts["inbox"]
+        self._update_inbox()
         self._populate_list()
 
-    def _update_inbox_bar(self, inbox: int) -> None:
-        bar = self.query_one("#inboxbar", Static)
-        if inbox:
-            bar.display = True
-            plural = "s" if inbox != 1 else ""
-            bar.update(f"⚑  INBOX · {inbox} document{plural} need{'' if plural else 's'} review")
+    def _update_inbox(self) -> None:
+        pill = self.query_one("#inboxpill", Static)
+        if self._inbox:
+            pill.display = True
+            pill.update(
+                f"[b $accent]⚑[/]"
+                + sep(2)
+                + f"[b $accent]{self._inbox} in inbox — press r[/]"
+            )
         else:
-            bar.display = False
+            pill.display = False
+        self.query_one("#cheatbar", Static).update(_cheatbar(self._inbox))
 
     def _populate_list(self) -> None:
         if self.docs is None:
@@ -166,6 +278,12 @@ class SoapApp(App):
         )
         doclist = self.query_one(DocumentList)
         doclist.populate(rows)
+        title = (
+            self.filter_value
+            if self.filter_kind in ("tag", "collection") and self.filter_value
+            else _FILTER_TITLES.get(self.filter_kind, "Documents")
+        )
+        doclist.border_title = f"{title} · {len(rows)}"
         if not rows:
             self.query_one(DetailPane).show(None)
 
@@ -185,10 +303,13 @@ class SoapApp(App):
             self.filter_value = item.value
             self._populate_list()
 
-    @on(ListView.Highlighted, "#doclist")
-    def _doc_moved(self, event: ListView.Highlighted) -> None:
-        row_id = getattr(event.item, "row", None)
-        self._show_detail(row_id.id if row_id is not None else None)
+    @on(DataTable.RowHighlighted, "#doclist")
+    def _doc_moved(self, event: DataTable.RowHighlighted) -> None:
+        self._show_detail(event.row_key.value if event.row_key else None)
+
+    @on(DataTable.RowSelected, "#doclist")
+    def _doc_selected(self, event: DataTable.RowSelected) -> None:
+        self.action_open()
 
     @on(Input.Changed, "#search")
     def _search_changed(self, event: Input.Changed) -> None:
@@ -242,21 +363,14 @@ class SoapApp(App):
             self.notify(", ".join(parts))
         self.refresh_data()
 
-    def action_add(self) -> None:
-        self.notify("add isn't wired into the TUI yet — use `soap add …`")
-
-    def action_export(self) -> None:
-        self.notify("bibtex export isn't wired up yet")
-
-    def action_filter(self) -> None:
-        self.notify("filter menu is coming; use the sidebar or / search for now")
-
     def action_help(self) -> None:
         self.push_screen(HelpScreen())
 
     def action_cycle_theme(self) -> None:
-        names = [t.name for t in THEMES] + [
-            n for n in self.available_themes if n not in {t.name for t in THEMES}
+        names = [t.name for t in BUNDLED_THEMES] + [
+            n
+            for n in self.available_themes
+            if n not in {t.name for t in BUNDLED_THEMES}
         ]
         try:
             i = names.index(self.theme)

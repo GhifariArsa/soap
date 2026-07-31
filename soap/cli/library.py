@@ -28,7 +28,7 @@ app = typer.Typer()
 @app.command()
 def add(
     sources: list[str] = typer.Argument(
-        ..., metavar="SOURCE...", help="Local file, directory, or URL to add."
+        [], metavar="SOURCE...", help="Local file, directory, or URL to add."
     ),
     title: str | None = typer.Option(None, "--title", help="Override title."),
     author: list[str] = typer.Option(
@@ -72,6 +72,13 @@ def add(
     ),
 ):
     """Add a document (or many) to the library from a file, folder, or URL."""
+    if not sources and not (doi or arxiv):
+        raise typer.BadParameter("provide SOURCE, --doi, or --arxiv")
+    # An identifier-only add is a single canonical URL source. The library
+    # normalizes the identifier and retains this URL for browser opening.
+    if not sources:
+        sources = [doi or arxiv]  # type: ignore[list-item]
+
     library = Library(resolve_soap_dir(path))
     if not library.is_initialized:
         typer.echo(

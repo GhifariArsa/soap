@@ -75,6 +75,25 @@ def doi_from_url(url: str) -> str | None:
     return m.group(1).rstrip(".,;:)]}>\"'")
 
 
+def doi_from_input(value: str) -> str | None:
+    """Extract and normalize a DOI from a DOI URL or bare DOI."""
+    value = value.strip()
+    found = doi_from_url(value)
+    if found:
+        return found
+    if re.match(r"^10\.\d{4,9}/\S+$", value, re.I):
+        return value.rstrip(".,;:)]}>\"'")
+    return None
+
+
+def canonical_arxiv_url(arxiv_id: str) -> str:
+    return f"https://arxiv.org/abs/{arxiv_id}"
+
+
+def canonical_doi_url(doi: str) -> str:
+    return f"https://doi.org/{doi}"
+
+
 def isbn_from_url(url: str) -> str | None:
     m = _ISBN_URL_RE.search(url)
     return m.group(1) if m else None
@@ -129,6 +148,7 @@ def resolve_url(
 
     arxiv_id = arxiv_id_from_url(url) or bare_arxiv_id(url)
     if arxiv_id:
+        result.url = url if is_url(url) else canonical_arxiv_url(arxiv_id)
         result.identifier = Identifier("arxiv", arxiv_id)
         if fetch:
             result.fetched = fetch_arxiv(arxiv_id, client=client)
@@ -138,8 +158,9 @@ def resolve_url(
             _attach_pdf(result, arxiv_pdf_url(arxiv_id), client, label=f"arXiv {arxiv_id}")
         return result
 
-    doi = doi_from_url(url)
+    doi = doi_from_input(url)
     if doi:
+        result.url = url if is_url(url) else canonical_doi_url(doi)
         result.identifier = Identifier("doi", doi)
         if fetch:
             result.fetched = fetch_crossref(doi, client=client)

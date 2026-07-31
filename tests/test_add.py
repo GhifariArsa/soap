@@ -109,6 +109,35 @@ def test_add_pdf_with_arxiv_flag(library, make_pdf):
     assert outcome.document.arxiv_id == "2006.11239v2"
 
 
+def test_doi_option_without_positional_source_uses_canonical_url(library):
+    outcome = add(
+        library, overrides=Overrides(doi=f"https://doi.org/{DOI}"),
+        client=_crossref_client(),
+    )
+    assert outcome.status == "added"
+    assert outcome.document.doi == DOI
+    assert outcome.document.url == f"https://doi.org/{DOI}"
+    assert "https://doi.org/https" not in (outcome.document.url or "")
+
+
+def test_bare_arxiv_option_without_positional_source_download_fallback(library):
+    def handler(request):
+        if "export.arxiv.org" in str(request.url):
+            return httpx.Response(200, text=ARXIV_BODY)
+        raise httpx.ConnectError("download unavailable")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    outcome = add(
+        library, overrides=Overrides(arxiv_id="2006.11239v2"), client=client,
+    )
+    assert outcome.status == "added"
+    assert outcome.document.arxiv_id == "2006.11239v2"
+    assert outcome.document.url == "https://arxiv.org/abs/2006.11239v2"
+    assert outcome.document.files == []
+    assert outcome.document.title == "Denoising Diffusion Probabilistic Models"
+    assert any("no PDF downloaded" in warning for warning in outcome.warnings)
+
+
 # No identifier -> filename title, local, needs_review ----------------------
 
 

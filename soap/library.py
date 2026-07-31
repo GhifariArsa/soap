@@ -199,7 +199,7 @@ def _now_iso() -> str:
 
 def add(
     library: "Library",
-    source: str,
+    source: str | None = None,
     *,
     overrides: Overrides | None = None,
     move: bool = False,
@@ -283,6 +283,26 @@ def _add_body(
     confirm, field_prompter, docs, client, temp_holder,
 ):
     warnings: list[str] = []
+    source_was_implicit = source is None
+
+    # Explicit identifier options accept either URLs or bare identifiers. Keep
+    # only the normalized identifier in the document, and use a canonical URL
+    # as the source when no positional source was supplied.
+    if overrides.doi:
+        overrides.doi = url_mod.doi_from_input(overrides.doi) or overrides.doi
+    if overrides.arxiv_id:
+        overrides.arxiv_id = (
+            url_mod.arxiv_id_from_url(overrides.arxiv_id)
+            or url_mod.bare_arxiv_id(overrides.arxiv_id)
+            or overrides.arxiv_id
+        )
+    if source is None:
+        if overrides.doi:
+            source = url_mod.canonical_doi_url(overrides.doi)
+        elif overrides.arxiv_id:
+            source = url_mod.canonical_arxiv_url(overrides.arxiv_id)
+        else:
+            return AddOutcome("error", message="no source; supply SOURCE, --doi, or --arxiv")
 
     # 1. Resolve the source. A URL yields metadata, and (when fetching, not a
     #    dry run) a best-effort PDF download; a local path yields a file.
@@ -294,11 +314,12 @@ def _add_body(
     identifier: Identifier | None = None
     fetched = None
     fallback_title: str | None = None
+    resolved_source_url: str | None = source if url_mod.is_url(source) else None
 
     # A bare arXiv id (``2101.00001``) is a metadata+download ref, not a path —
     # but only when no such local file exists (a real file always wins).
     is_ref = from_url
-    if not from_url and url_mod.bare_arxiv_id(source):
+    if not from_url and (url_mod.bare_arxiv_id(source) or url_mod.doi_from_input(source)):
         if not Path(source).expanduser().exists():
             is_ref = True
 
@@ -308,6 +329,7 @@ def _add_body(
         )
         warnings.extend(resolution.warnings)
         identifier = resolution.identifier
+        resolved_source_url = resolution.url
         fetched = resolution.fetched
         fallback_title = resolution.fallback_title
         if resolution.file_path is not None:
@@ -386,7 +408,12 @@ def _add_body(
             warnings=warnings,
         )
 
-    doc_url = merged.url or (source if from_url else None)
+    # Bare identifiers get the synthesized browser URL even when an API returns
+    # a different (often http) URL; explicit URL sources retain their URL.
+    doc_url = (
+        resolved_source_url if is_ref and (not from_url or source_was_implicit)
+        else merged.url or (resolved_source_url if is_ref else None)
+    )
     # A document with no file is valid but always needs a human to attach one.
     review = merged.review_status if file_path is not None else ReviewStatus.NEEDS_REVIEW
     # `always_review: true` in $SOAP_DIR/config.yaml routes every add through the

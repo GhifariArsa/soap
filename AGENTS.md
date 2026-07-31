@@ -80,14 +80,16 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `uv build` (emits `soap_tui-*` wheel + sdist).
 
 - **Release CI:** `.github/workflows/release.yml` fires on a `v*` tag push (or
-  `workflow_dispatch` for a build-only dry run). It builds PyApp standalone binaries
-  across 4 native runners (macOS arm64/x86_64 + Linux x86_64/arm64 — no Windows, no
-  signing), publishes to PyPI via **Trusted Publishing** (`pypi` environment, OIDC,
-  no tokens), and cuts a GitHub Release. `cargo install pyapp --locked` is mandatory.
-  The publish/release jobs are tag-gated (skipped on dispatch). PyApp knobs, the
-  one-time PyPI pending-publisher setup, and the captain-gated public steps are
-  documented in `docs/releasing.md`. The frozen TUI is smoke-tested under a pty by
-  `scripts/tui_smoke.py`. Homebrew bump is intentionally NOT here (separate task).
+  `workflow_dispatch` for a build-only dry run). It first reuses the required checks
+  from `.github/workflows/ci.yml`, then builds PyApp standalone binaries across 4
+  native runners (macOS arm64/x86_64 + Linux x86_64/arm64 — no Windows, no signing),
+  publishes to PyPI via **Trusted Publishing** (`pypi` environment, OIDC, no tokens),
+  and cuts a GitHub Release. Actions and toolchain/build inputs are pinned in the
+  workflows; the publish/release jobs are tag-gated (skipped on dispatch).
+  PyApp knobs, the one-time PyPI pending-publisher setup, and the captain-gated
+  public steps are documented in `docs/releasing.md`. The frozen TUI is smoke-tested
+  under a pty by `scripts/tui_smoke.py`. Homebrew bump is intentionally NOT here
+  (separate task).
 
 - **Self-update:** `soap self update` is OUR Typer subcommand (PyApp's `self` group is
   off via `PYAPP_SELF_COMMAND=none`), all in `soap/cli/selfupdate.py`, wired in

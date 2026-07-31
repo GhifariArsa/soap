@@ -32,9 +32,7 @@ def main(argv: list[str]) -> int:
             )
             return 1
 
-        entry_points = [
-            name for name in names if name.endswith(".dist-info/entry_points.txt")
-        ]
+        entry_points = [name for name in names if name.endswith(".dist-info/entry_points.txt")]
         if len(entry_points) != 1:
             print("wheel must contain exactly one entry_points.txt", file=sys.stderr)
             return 1

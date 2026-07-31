@@ -30,6 +30,7 @@ from soap.db.documents import DocumentService
 from soap.library import Library
 from soap.tui._markup import key, sep
 from soap.tui.review import ReviewScreen
+from soap.tui.tags import TagEditScreen
 from soap.tui.themes import BUNDLED_THEMES, DEFAULT_THEME, load_user_themes
 from soap.tui.widgets import DetailPane, DocumentList, Sidebar, SidebarRow
 
@@ -53,6 +54,7 @@ def _cheatbar(inbox: int) -> str:
             key("j/k", "move"),
             key("enter", "open"),
             key("/", "find"),
+            key("t", "tags"),
             review,
             key("tab", "pane"),
             key("?", "keys"),
@@ -94,6 +96,7 @@ class HelpScreen(ModalScreen[None]):
             [
                 ("enter / o", "open file"),
                 ("/", "search"),
+                ("t", "edit tags"),
                 ("r", "review inbox"),
             ],
         ),
@@ -158,6 +161,7 @@ class SoapApp(App):
         Binding("enter", "open", "open", show=False),
         Binding("slash", "search", "search", show=False, key_display="/"),
         Binding("r", "review", "review inbox", show=False),
+        Binding("t", "edit_tags", "edit tags", show=False),
         Binding("question_mark", "help", "help", show=False, key_display="?"),
         Binding("tab", "focus_pane(1)", "Next pane", show=False),
         Binding("shift+tab", "focus_pane(-1)", "Prev pane", show=False),
@@ -278,11 +282,14 @@ class SoapApp(App):
         )
         doclist = self.query_one(DocumentList)
         doclist.populate(rows)
-        title = (
-            self.filter_value
-            if self.filter_kind in ("tag", "collection") and self.filter_value
-            else _FILTER_TITLES.get(self.filter_kind, "Documents")
-        )
+        if self.filter_kind == "tag" and self.filter_value:
+            title = f"# {self.filter_value}"
+        elif self.filter_kind == "collection" and self.filter_value:
+            title = self.filter_value
+        else:
+            title = _FILTER_TITLES.get(self.filter_kind, "Documents")
+        if self.search_term:
+            title += f' · /{self.search_term}'
         doclist.border_title = f"{title} · {len(rows)}"
         if not rows:
             self.query_one(DetailPane).show(None)
@@ -362,6 +369,29 @@ class SoapApp(App):
                 parts.append(f"{skipped} skipped")
             self.notify(", ".join(parts))
         self.refresh_data()
+
+    def action_edit_tags(self) -> None:
+        doc_id = self.query_one(DocumentList).current_id
+        if self.docs is None or doc_id is None:
+            return
+        doc = self.docs.get_document(doc_id)
+        if doc is None:
+            return
+        self.push_screen(
+            TagEditScreen(self.library, self.docs, doc),
+            lambda saved: self._after_tag_edit(doc_id, saved),
+        )
+
+    def _after_tag_edit(self, doc_id: str, saved: list[str] | None) -> None:
+        # None = cancelled / no change; a list = the persisted tag set.
+        if saved is None:
+            return
+        n = len(saved)
+        self.notify(f"tags saved — {n} tag{'s' if n != 1 else ''}")
+        # Rebuild the sidebar tag counts + list, then re-show this document so its
+        # chips reflect the new set (the cursor position is preserved).
+        self.refresh_data()
+        self._show_detail(doc_id)
 
     def action_help(self) -> None:
         self.push_screen(HelpScreen())

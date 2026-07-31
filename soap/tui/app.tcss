@@ -161,12 +161,12 @@ DataTable > .datatable--odd-row {
 
 /* --- modals: review, help, empty-library ------------------------------ */
 
-ReviewScreen, HelpScreen {
+ReviewScreen, HelpScreen, TagEditScreen {
     align: center middle;
     background: $background 70%;
 }
 
-#review-card, #help-card, #empty-card {
+#review-card, #help-card, #empty-card, #tag-card {
     width: 74;
     max-width: 90%;
     height: auto;

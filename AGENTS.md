@@ -33,6 +33,14 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `DocumentService.list_documents` (venue/read_status/author summary) — read-only, no
   schema change. Regenerate the reference screenshots with
   `uv run python scripts/shoot_tui.py` (writes SVGs to `docs/screens/`).
+- **Tags are first-class in the TUI.** Edit via the `t` key → `soap/tui/tags.py`
+  `TagEditScreen` (keyboard-first: enter/comma adds, `tab` completes the top
+  suggestion from `DocumentService.tag_counts()`, empty-`backspace` drops the last
+  chip, `^s` saves, `esc` cancels). It persists the whole document through
+  `save_document` (rewrites `info.yaml` + reindex — never raw DB) so chips and the
+  sidebar tag counts refresh live. Filtering is the existing sidebar
+  `filter_kind="tag"` path (`app.py:_sidebar_moved` → `list_documents`); the list
+  border-title shows `# <tag>` (plus `· /<search>` when a `/` search is ANDed on).
 - **Themes are user-extensible** (`soap/tui/themes.py`). `BUNDLED_THEMES` ships
   aqua-slate (default) + one-dark + catppuccin-mocha; `load_user_themes` discovers
   `$SOAP_DIR/themes/*.yaml` (YAML, matching `soap/config.py`) and degrades gracefully

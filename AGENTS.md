@@ -63,12 +63,21 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `soap/tui/review.py`. Widgets emit theme slots (`$primary`/`$accent`/`$success`/…)
   and shared markup helpers (`soap/tui/_markup.py`: `sep`/`key`/`confidence_meter`),
   **never hardcoded hex** — so a theme change reskins everything. The app root
-  (`App, Screen` in `app.tcss`) is `background: transparent` by default so the
-  terminal's own background shows through — this is terminal-background passthrough,
-  **not** emulator opacity control soap can set; opaque pane/card rules keep the UI
-  readable and each theme's `background` slot still drives Textual's derived colors,
-  so don't reintroduce an opaque `Screen` background (regression:
-  `tests/test_themes.py`). `sep()` also fixes
+  (`App, Screen` in `app.tcss`) is `background: ansi_default` (terminal-default
+  background = SGR 49) so the terminal's own, possibly transparent, background
+  shows through — like lazygit/Claude Code. This is terminal-background
+  passthrough, **not** emulator opacity control soap can set. Two pieces are load-
+  bearing and must stay together: `ansi_default` (NOT `transparent` — `App.render`
+  paints a `Blank` of the root color with nothing beneath it, so plain
+  `transparent` flattens to solid black), and `ansi_color=True` on `SoapApp`
+  (`soap/tui/app.py`) which keeps Textual's ANSI→truecolor filter off so
+  `ansi_default` survives to the terminal instead of being re-flattened to an
+  opaque RGB fill. Truecolor theme colors (panes/borders/text) are unaffected;
+  the opaque pane/card rules keep the UI readable and always seat text on an
+  opaque surface. Don't reintroduce an opaque or `transparent` `App`/`Screen`
+  background, and don't drop `ansi_color=True` (regression: the
+  `test_app_root_is_terminal_default_but_theme_surfaces_are_not` PTY-verified
+  invariant in `tests/test_themes.py`). `sep()` also fixes
   Textual's span-boundary whitespace stripping (the old `sourcearxiv`/`movej/k` mash);
   use it for every `label<space>value`. The list feed adds display-only columns to
   `DocumentService.list_documents` (venue/read_status/author summary) — read-only, no

@@ -198,7 +198,13 @@ class SoapApp(App):
     ]
 
     def __init__(self, library: Library, editor_runner=None) -> None:
-        super().__init__()
+        # ``ansi_color=True`` keeps Textual's ANSI→truecolor filter off so the
+        # ``ansi_default`` root background in app.tcss survives to the terminal
+        # as SGR 49 (terminal-default background) instead of being flattened to
+        # an opaque RGB fill — that is what lets a transparent terminal window
+        # show through the app. Truecolor theme colors (panes/borders/text) are
+        # unaffected; only ANSI-named colors pass through verbatim.
+        super().__init__(ansi_color=True)
         self.library = library
         # Injectable for tests; the default is the shared VISUAL/EDITOR/vi
         # runner used by the library and inbox review surfaces.

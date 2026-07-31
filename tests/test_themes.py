@@ -191,8 +191,19 @@ def test_app_registers_bundled_and_user_themes(library: Library):
     _run_app(library, check)
 
 
-def test_app_root_is_transparent_but_theme_surfaces_are_not(library: Library):
-    """Terminal background passthrough must not erase themed UI surfaces."""
+def test_app_root_is_terminal_default_but_theme_surfaces_are_not(library: Library):
+    """The root surface must defer to the terminal's own background so a
+    transparent terminal window shows through — never assert an opaque app/screen
+    fill — while themed UI surfaces (panes) stay opaque and readable.
+
+    Regression for the "solid background fill" bug: a plain ``transparent`` root
+    flattens to solid black because ``App.render`` paints a ``Blank`` of the root
+    color with nothing beneath it to composite against. The passthrough color is
+    ``ansi_default`` (terminal-default background, SGR 49), and it only survives
+    to the terminal because ``ansi_color`` is enabled (Textual's ANSI→truecolor
+    filter would otherwise re-flatten it into an opaque RGB fill).
+    """
+    ansi_default = Color.parse("ansi_default")
     _write_theme(
         library.path,
         "solar.yaml",
@@ -202,13 +213,21 @@ def test_app_root_is_transparent_but_theme_surfaces_are_not(library: Library):
     )
 
     async def check(pilot, app):
+        # ANSI colors must pass through verbatim, else ansi_default is flattened.
+        assert app.ansi_color is True
         names = [theme.name for theme in BUNDLED_THEMES] + ["solarized"]
         for name in names:
             app.theme = name
             await pilot.pause()
-            assert app.styles.background.is_transparent
-            assert app.screen.styles.background.is_transparent
-            assert not app.query_one("#topbar").styles.background.is_transparent
+            # Root/screen defer to the terminal default (not an opaque fill and
+            # not transparent-flattened-to-black).
+            assert app.styles.background == ansi_default
+            assert app.styles.background.ansi == -1
+            assert app.screen.styles.background == ansi_default
+            # Themed surfaces stay opaque so text/borders remain readable.
+            topbar = app.query_one("#topbar").styles.background
+            assert not topbar.is_transparent
+            assert topbar.ansi != -1
             panel = app.query_one("#doclist").styles.background
             assert not panel.is_transparent
             assert panel == Color.parse(app.theme_variables["panel"])

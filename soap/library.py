@@ -208,6 +208,8 @@ def add(
     dry_run: bool = False,
     edit: bool = False,
     editor_runner=None,
+    confirm: bool = False,
+    field_prompter=None,
     docs: DocumentService | None = None,
     client: httpx.Client | None = None,
 ) -> AddOutcome:
@@ -225,6 +227,11 @@ def add(
     (a ``Callable[[Path], None]``) overrides how the editor is launched, for
     tests.
 
+    ``confirm`` (the ``--confirm`` flag) runs the inline field-by-field walk
+    (:func:`prompt_fields`) over the generated metadata before writing, driven by
+    ``field_prompter`` (a ``Callable[[str, str], str]``); soap re-derives the
+    citekey and file paths from the corrected metadata just as ``edit`` does.
+
     A ``DocumentService`` and ``httpx.Client`` may be injected for reuse across a
     batch; otherwise they are created and closed here.
     """
@@ -237,7 +244,9 @@ def add(
         return _add_inner(
             library, source, overrides,
             move=move, fetch=fetch, force=force, dry_run=dry_run,
-            edit=edit, editor_runner=editor_runner, docs=docs, client=client,
+            edit=edit, editor_runner=editor_runner,
+            confirm=confirm, field_prompter=field_prompter,
+            docs=docs, client=client,
         )
     finally:
         if owns_client:
@@ -248,7 +257,8 @@ def add(
 
 def _add_inner(
     library, source, overrides, *,
-    move, fetch, force, dry_run, edit, editor_runner, docs, client,
+    move, fetch, force, dry_run, edit, editor_runner,
+    confirm, field_prompter, docs, client,
 ):
     warnings: list[str] = []
 
@@ -393,6 +403,28 @@ def _add_inner(
         except (yaml.YAMLError, ValueError) as exc:
             return AddOutcome(
                 "error", message=f"edit produced invalid metadata: {exc}",
+                warnings=warnings,
+            )
+        citekey = unique_citekey(
+            generate_citekey(document.authors, document.year, document.title), taken
+        )
+        document.id = citekey
+        if file_path is not None and stored_name is not None:
+            rel = Path("documents") / citekey / stored_name
+            document.files = [FileRef(path=rel.as_posix(), mime=file_mime, sha256=sha)]
+        else:
+            document.files = []
+
+    # 6b. Optional inline confirm walk (`--confirm`): the same guided,
+    #     field-by-field correction the review queue uses, run at add time. Unlike
+    #     a review-edit (which pins the id, decision 2), a brand-new add re-derives
+    #     the citekey/file paths from the corrected metadata — exactly as `--edit`.
+    if confirm and not dry_run and field_prompter is not None:
+        try:
+            document = prompt_fields(document, field_prompter)
+        except (ValueError, EOFError) as exc:
+            return AddOutcome(
+                "error", message=f"confirm produced invalid metadata: {exc}",
                 warnings=warnings,
             )
         citekey = unique_citekey(
@@ -605,6 +637,88 @@ def delete_document(
     docs.remove(doc_id)
 
 
+# --- inline field-by-field correction walk ---------------------------------
+#
+# The guided alternative to dumping the whole info.yaml into $EDITOR: walk the
+# few fields that actually matter, each prefilled with the detected value, Enter
+# keeps it and typed input overrides. This is a pure, IO-injected helper (the
+# `prompt_fn` supplies each field's raw input) so it is unit-testable exactly
+# like `review_inbox`, and the same walk backs the CLI review action, the TUI
+# review form, and `soap add --confirm`.
+
+# Only the core fields are walked; abstract/tags/arbitrary keys stay reachable
+# via $EDITOR (and, in the TUI, the field list). Captain's decision 1.
+CORE_REVIEW_FIELDS = ("title", "authors", "year", "type", "venue")
+
+
+def prompt_fields(document: Document, prompt_fn) -> Document:
+    """Walk the core fields, prefilled, and return a re-validated ``Document``.
+
+    ``prompt_fn(field, current)`` is called once per field in
+    :data:`CORE_REVIEW_FIELDS` with the field name and its current value rendered
+    as a string; it returns the reviewer's raw input. An empty/whitespace answer
+    keeps the detected value; any other input replaces it. ``authors`` is entered
+    as a ``;``-separated list, ``year`` as an integer (a non-numeric answer raises
+    ``ValueError`` for the caller to surface). IO is fully injected so this is
+    testable without a terminal.
+
+    The returned document keeps the **same id** as ``document``: an in-place
+    review correction pins the citekey and never renames the folder (captain's
+    decision 2, matching the ``edit_document``/``save_document`` invariant). Only
+    a brand-new ``add()`` derives a fresh key — which it does itself, by
+    recomputing ``generate_citekey``/``unique_citekey`` after this walk, exactly
+    as its ``--edit`` path already does.
+    """
+    data = document.model_dump(mode="json")
+
+    title = prompt_fn("title", document.title or "")
+    if title.strip():
+        data["title"] = title.strip()
+
+    authors = prompt_fn("authors", "; ".join(document.authors))
+    if authors.strip():
+        data["authors"] = [a.strip() for a in authors.split(";") if a.strip()]
+
+    year = prompt_fn("year", str(document.year) if document.year else "")
+    if year.strip():
+        data["year"] = int(year.strip())  # ValueError bubbles to the caller
+
+    doc_type = prompt_fn("type", document.type or "")
+    if doc_type.strip():
+        data["type"] = doc_type.strip()
+
+    venue = prompt_fn("venue", document.venue or "")
+    if venue.strip():
+        data["venue"] = venue.strip()
+
+    updated = Document(**data)
+    # Pin the id: `data` carries the original id through untouched, and we make
+    # that explicit so a review-edit can never repoint the folder (decision 2).
+    updated.id = document.id
+    return updated
+
+
+def correct_document(
+    library: "Library",
+    doc_id: str,
+    docs: DocumentService,
+    prompt_fn,
+) -> Document:
+    """Run the inline field walk over a queued document and save the result.
+
+    Reads the document from disk, walks its core fields via :func:`prompt_fields`
+    (prefilled, Enter-keeps, type-overrides), then persists through
+    :func:`save_document`. The citekey/folder are pinned (decision 2); only the
+    metadata changes. Raises ``ValueError`` on invalid input (e.g. a non-numeric
+    year) with the on-disk file left untouched, so nothing is lost.
+    """
+    document = load_document(library, doc_id)
+    updated = prompt_fields(document, prompt_fn)
+    updated.id = doc_id  # belt-and-suspenders: never repoint the folder
+    save_document(library, updated, docs)
+    return updated
+
+
 # --- inbox review (the CLI counterpart of the TUI ReviewScreen) ------------
 #
 # The interactive walk over the needs_review queue. The orchestration lives
@@ -615,6 +729,7 @@ def delete_document(
 
 REVIEW_ACTIONS = {
     "a": "accept", "f": "accept", "accept": "accept", "file": "accept", "": "accept",
+    "c": "correct", "correct": "correct",
     "e": "edit", "edit": "edit",
     "s": "skip", "skip": "skip",
     "d": "delete", "delete": "delete",
@@ -630,6 +745,7 @@ class ReviewSummary:
     skipped: int = 0
     deleted: int = 0
     edited: int = 0
+    corrected: int = 0
     errors: int = 0
 
 
@@ -642,6 +758,7 @@ def review_inbox(
     confirm_delete,
     report,
     editor_runner=None,
+    prompt_field=None,
 ) -> ReviewSummary:
     """Walk the ``needs_review`` queue one document at a time, oldest first.
 
@@ -655,10 +772,15 @@ def review_inbox(
     - ``confirm_delete(doc)`` -> bool — confirm a destructive delete.
     - ``report(message)`` — emit progress/errors/notices.
     - ``editor_runner`` — passed through to :func:`edit_document` for ``edit``.
+    - ``prompt_field(field, current)`` — the per-field prompt for the inline
+      ``correct`` walk (see :func:`prompt_fields`); if ``None`` the ``correct``
+      action is unavailable and reported as such.
 
-    Actions mirror the TUI: **accept** files the document, **edit** opens
-    ``info.yaml`` and re-prompts on the same item, **skip** leaves it queued and
-    advances, **delete** removes it (after confirmation), **quit** stops. An
+    Actions mirror the TUI: **accept** files the document, **correct** walks the
+    core fields inline (prefilled) and re-prompts on the same item, **edit**
+    opens the whole ``info.yaml`` in ``$EDITOR`` and re-prompts on the same item,
+    **skip** leaves it queued and advances, **delete** removes it (after
+    confirmation), **quit** stops. An
     error on one document (missing ``info.yaml``, invalid edit) is reported and
     the walk continues, matching the batch resilience of ``add``.
     """
@@ -683,7 +805,7 @@ def review_inbox(
             break  # piped/empty stdin: end cleanly, never hang
         action = REVIEW_ACTIONS.get(raw.strip().lower())
         if action is None:
-            report(f"unknown action {raw.strip()!r} — a/e/s/d/q")
+            report(f"unknown action {raw.strip()!r} — a/c/e/s/d/q")
             continue  # re-prompt on the same document
 
         if action == "quit":
@@ -714,6 +836,20 @@ def review_inbox(
                 summary.errors += 1
                 report(f"could not delete {doc_id}: {exc}")
             pos += 1
+            continue
+        if action == "correct":
+            if prompt_field is None:
+                report("correction not available on this surface — use e for $EDITOR")
+                continue
+            try:
+                correct_document(library, doc_id, docs, prompt_field)
+                summary.corrected += 1
+            except EOFError:
+                break  # mid-walk EOF: end cleanly like ask_action does
+            except Exception as exc:  # noqa: BLE001 - invalid input keeps the item
+                summary.errors += 1
+                report(f"correction not applied to {doc_id}: {exc}")
+            # Stay on the same item so the reviewer sees the result and files it.
             continue
         if action == "edit":
             try:

@@ -1,0 +1,33 @@
+# Project agent memory
+
+This file is the project's committed home for project-intrinsic agent knowledge: build, test, release, architecture, and sharp-edge notes that should travel with the code.
+
+- Add durable project-specific notes here as they are discovered through real work.
+
+## Architecture invariants
+
+- **Disk is the source of truth.** Every mutation rewrites `documents/<id>/info.yaml`
+  first, then re-syncs the SQLite index (rebuildable). Write through the helpers in
+  `soap/library.py` (`save_document`, `set_review_status`, `edit_document`,
+  `delete_document`), never the DB directly.
+- **CLI and TUI share the review core.** The interactive walk lives in
+  `soap/library.py:review_inbox` (IO fully injected: `render`/`ask_action`/
+  `confirm_delete`/`report`/`prompt_field`) so it is unit-tested without a terminal
+  (`tests/test_inbox_review.py`). CLI (`soap/cli/inbox.py`) and TUI
+  (`soap/tui/review.py`) are thin shims — keep their review semantics consistent.
+- **Inline correction walk:** `soap/library.py:prompt_fields` walks the core fields
+  (`CORE_REVIEW_FIELDS`: title/authors/year/type/venue), prefilled, Enter-keeps /
+  type-overrides. It **pins the citekey/id** on a review-edit (never renames the
+  folder); only a brand-new `add()` derives a fresh key. Shared by the CLI `[c]orrect`
+  action, the TUI review form, and `soap add --confirm`.
+- **`always_review: true`** is the shipped default (`soap/cli/init.py`), so the review
+  queue is the primary add path — weight review UX accordingly.
+- **Testing:** `uv run pytest`. TUI is covered with Textual's pilot via `asyncio.run`
+  (`tests/test_tui_review.py`) — no pytest-asyncio plugin.
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.

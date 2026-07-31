@@ -47,7 +47,7 @@ class HelpScreen(ModalScreen[None]):
 [$accent]panes[/]    h/l  focus left/right     tab  cycle
 [$accent]open[/]     enter or o   open the selected file
 [$accent]search[/]   /    search title/author/tag     esc  clear
-[$accent]review[/]   r    walk the inbox (a file · e edit · s skip)
+[$accent]review[/]   r    walk the inbox (a file · c correct · e $EDITOR · s skip)
 [$accent]theme[/]    ctrl+t cycle     ctrl+p command palette
 [$accent]other[/]    ctrl+r refresh     ? help     q quit
 

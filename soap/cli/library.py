@@ -10,6 +10,7 @@ from pathlib import Path
 import httpx
 import typer
 
+from soap.cli._prompt import prompt_field
 from soap.db.documents import DocumentService
 from soap.ingest.merge import Overrides
 from soap.library import (
@@ -56,6 +57,9 @@ def add(
     ),
     edit: bool = typer.Option(
         False, "--edit", "-e", help="Open the generated info.yaml in $EDITOR before saving."
+    ),
+    confirm: bool = typer.Option(
+        False, "--confirm", help="Walk the core fields inline (prefilled) before saving."
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Show what would be added; write nothing."
@@ -107,6 +111,8 @@ def add(
                     force=force,
                     dry_run=dry_run,
                     edit=edit,
+                    confirm=confirm,
+                    field_prompter=prompt_field if confirm else None,
                     docs=docs,
                     client=client,
                 )

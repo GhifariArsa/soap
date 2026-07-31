@@ -11,13 +11,14 @@ import sys
 
 import typer
 
+from soap.cli._prompt import prompt_field
 from soap.db.documents import DocumentService
-from soap.library import Library, resolve_soap_dir, review_inbox
+from soap.library import CORE_REVIEW_FIELDS, Library, resolve_soap_dir, review_inbox
 from soap.models.document import Document
 
 app = typer.Typer(help="Work the inbox: review documents awaiting a human.")
 
-_MENU = "[a]ccept · [e]dit · [s]kip · [d]elete · [q]uit"
+_MENU = "[a]ccept · [c]orrect · [e]$EDITOR · [s]kip · [d]elete · [q]uit"
 
 
 def _render(doc: Document, position: int, total: int) -> None:
@@ -55,6 +56,18 @@ def _ask_action() -> str:
         typer.echo()  # tidy the newline the user's Ctrl-D didn't emit
         raise EOFError
     return line
+
+
+def _prompt_field(field: str, current: str) -> str:
+    """Per-field prompt for the ``[c]orrect`` walk; heads the walk once."""
+    if field == CORE_REVIEW_FIELDS[0]:
+        typer.echo(
+            typer.style(
+                "  correcting — Enter keeps the value, type to override",
+                fg=typer.colors.BRIGHT_BLACK,
+            )
+        )
+    return prompt_field(field, current)
 
 
 def _confirm_delete(doc: Document) -> bool:
@@ -100,9 +113,12 @@ def review(
             ask_action=_ask_action,
             confirm_delete=_confirm_delete,
             report=_report,
+            prompt_field=_prompt_field,
         )
 
     parts = [f"{summary.filed} filed"]
+    if summary.corrected:
+        parts.append(f"{summary.corrected} corrected")
     if summary.edited:
         parts.append(f"{summary.edited} edited")
     if summary.skipped:

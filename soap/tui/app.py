@@ -343,14 +343,19 @@ class SoapApp(App):
         if self.docs is None or doc_id is None:
             return
         doc = self.docs.get_document(doc_id)
-        if doc is None or not doc.files:
+        if doc is None:
+            return
+        if doc.files:
+            target = self.library.path / doc.files[0].path
+            if not target.exists():
+                self.notify(f"file missing on disk: {target}", severity="error")
+                return
+            self._launch(target)
+        elif doc.url:
+            self._launch(doc.url)
+        else:
             self.notify("no file attached to this document", severity="warning")
             return
-        target = self.library.path / doc.files[0].path
-        if not target.exists():
-            self.notify(f"file missing on disk: {target}", severity="error")
-            return
-        self._launch(target)
 
     def action_review(self) -> None:
         if self.docs is None:
@@ -412,14 +417,14 @@ class SoapApp(App):
     # -- helpers -----------------------------------------------------------
 
     @staticmethod
-    def _launch(path: Path) -> None:
-        """Open a file with the OS default handler, non-blocking."""
+    def _launch(target: Path | str) -> None:
+        """Open a file or URL with the OS default handler, non-blocking."""
         if sys.platform == "darwin":
-            subprocess.Popen(["open", str(path)])
+            subprocess.Popen(["open", str(target)])
         elif os.name == "nt":
-            os.startfile(str(path))  # type: ignore[attr-defined]
+            os.startfile(str(target))  # type: ignore[attr-defined]
         else:
-            subprocess.Popen(["xdg-open", str(path)])
+            subprocess.Popen(["xdg-open", str(target)])
 
 
 def run(library: Library) -> None:

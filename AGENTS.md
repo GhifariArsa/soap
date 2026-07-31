@@ -62,7 +62,13 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `soap/tui/widgets.py` + `widgets_detail.py` (list `DataTable` + detail), and
   `soap/tui/review.py`. Widgets emit theme slots (`$primary`/`$accent`/`$success`/…)
   and shared markup helpers (`soap/tui/_markup.py`: `sep`/`key`/`confidence_meter`),
-  **never hardcoded hex** — so a theme change reskins everything. `sep()` also fixes
+  **never hardcoded hex** — so a theme change reskins everything. The app root
+  (`App, Screen` in `app.tcss`) is `background: transparent` by default so the
+  terminal's own background shows through — this is terminal-background passthrough,
+  **not** emulator opacity control soap can set; opaque pane/card rules keep the UI
+  readable and each theme's `background` slot still drives Textual's derived colors,
+  so don't reintroduce an opaque `Screen` background (regression:
+  `tests/test_themes.py`). `sep()` also fixes
   Textual's span-boundary whitespace stripping (the old `sourcearxiv`/`movej/k` mash);
   use it for every `label<space>value`. The list feed adds display-only columns to
   `DocumentService.list_documents` (venue/read_status/author summary) — read-only, no

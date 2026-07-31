@@ -3,8 +3,11 @@
    switching themes reskins everything without touching this file. The Aqua Slate
    system: quiet $border on every pane, teal $primary on the focused one. */
 
-Screen {
-    background: $background;
+/* Leave the root clear so the terminal's configured background shows through.
+   This is terminal background passthrough, not emulator opacity control; opaque
+   pane/card rules below keep the UI readable on terminals without transparency. */
+App, Screen {
+    background: transparent;
 }
 
 /* --- top bar: brand + search + inbox pill ----------------------------- */

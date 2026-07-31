@@ -41,6 +41,9 @@ source = "vcs"
 [tool.hatch.build.hooks.vcs]
 version-file = "soap/_version.py"
 
+[tool.hatch.build.targets.wheel]
+packages = ["soap"]
+
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",

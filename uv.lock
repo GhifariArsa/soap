@@ -312,8 +312,7 @@ wheels = [
 ]
 
 [[package]]
-name = "soap"
-version = "0.0.1"
+name = "soap-tui"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },

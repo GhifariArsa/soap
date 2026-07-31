@@ -3,3 +3,4 @@ node_modules/
 __pycache__/
 dist/
 build/
+soap/_version.py

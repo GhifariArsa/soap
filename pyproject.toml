@@ -1,9 +1,21 @@
 [project]
-name = "soap"
-version = "0.0.1"
-description = "Simple Organisation App built with Python"
+name = "soap-tui"
+dynamic = ["version"]
+description = "soap — a reference manager (CLI + TUI)"
 readme = "README.md"
 requires-python = ">=3.14"
+license = "MIT"
+authors = [{ name = "Ghifari Arsa" }]
+keywords = ["reference-manager", "bibliography", "cli", "tui"]
+classifiers = [
+    "Environment :: Console",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Intended Audience :: Science/Research",
+    "Topic :: Text Processing :: Markup",
+]
 dependencies = [
     "httpx>=0.28.1",
     "pydantic>=2.13.4",
@@ -12,12 +24,22 @@ dependencies = [
     "typer>=0.27.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/GhifariArsa/soap"
+Repository = "https://github.com/GhifariArsa/soap"
+
 [project.scripts]
 soap = "soap.main:app"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "soap/_version.py"
 
 [dependency-groups]
 dev = [

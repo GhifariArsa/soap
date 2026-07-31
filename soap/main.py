@@ -1,36 +1,18 @@
 import typer
 
-from soap.cli import init, inbox, library
+from soap.cli import init, inbox, library, selfupdate
 
 app = typer.Typer()
 app.add_typer(init.app)
 app.add_typer(library.app)
 app.add_typer(inbox.app, name="inbox")
-
-
-def _resolve_version() -> str:
-    """Best-effort version string for `soap --version`.
-
-    Prefers installed distribution metadata; falls back to the generated
-    ``soap/_version.py`` (written by hatch-vcs at build time) when running from
-    an uninstalled source tree.
-    """
-    from importlib.metadata import PackageNotFoundError, version
-
-    try:
-        return version("soap-tui")
-    except PackageNotFoundError:
-        try:
-            from soap._version import __version__
-
-            return __version__
-        except Exception:
-            return "0.0.0+unknown"
+app.add_typer(selfupdate.app, name="self")
 
 
 def _version_callback(value: bool) -> None:
     if value:
-        typer.echo(_resolve_version())
+        # Shares one resolver with `soap self update` so they never disagree.
+        typer.echo(selfupdate.current_version())
         raise typer.Exit()
 
 
@@ -47,6 +29,13 @@ def main(
 ) -> None:
     """soap — a reference manager. Run with no command to open the TUI."""
     if ctx.invoked_subcommand is not None:
+        # A once-per-24h, offline-safe hint that a newer soap exists. Skipped
+        # for `self` so it never runs mid-update; never blocks the subcommand.
+        if ctx.invoked_subcommand != "self":
+            from soap.cli.selfupdate import maybe_nudge
+            from soap.library import resolve_soap_dir
+
+            maybe_nudge(resolve_soap_dir())
         return
     # No subcommand: launch the terminal UI over the resolved library.
     from soap.library import Library, resolve_soap_dir

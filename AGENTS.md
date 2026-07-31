@@ -60,6 +60,17 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   documented in `docs/releasing.md`. The frozen TUI is smoke-tested under a pty by
   `scripts/tui_smoke.py`. Homebrew bump is intentionally NOT here (separate task).
 
+- **Self-update:** `soap self update` is OUR Typer subcommand (PyApp's `self` group is
+  off via `PYAPP_SELF_COMMAND=none`), all in `soap/cli/selfupdate.py`, wired in
+  `soap/main.py` as `app.add_typer(selfupdate.app, name="self")`. `detect_channel`
+  no-ops with an upgrade-command pointer for brew/pipx/uv-tool/pip and only swaps the
+  binary channel; the swap resolves the launcher via OS self-exe (NOT `sys.executable`),
+  verifies sha256 against the release `checksums.txt`, and `os.replace`s a same-dir temp.
+  Windows is a marked future path (`perform_update` refuses). `maybe_nudge` (called from
+  `main.py` for non-`self` subcommands) is the 24h-cached, offline-safe startup hint.
+  `current_version()` is the single version resolver `soap --version` also uses. Every
+  network/IO seam is injectable → `tests/test_selfupdate.py` mocks it all (no real net).
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

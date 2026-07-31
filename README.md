@@ -42,6 +42,23 @@ uv run soap --help
 `uv run soap …` resolves dependencies and runs the `soap` entry point
 (`soap = "soap.main:app"`). Every command below is invoked that way.
 
+### Install a standalone binary
+
+Once a [GitHub Release](https://github.com/GhifariArsa/soap/releases) is published,
+a single command downloads the right binary for your platform, verifies its
+checksum, and drops it in `~/.local/bin`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/GhifariArsa/soap/main/install.sh | sh
+```
+
+Supported targets: macOS (arm64, x86_64) and Linux (x86_64, arm64). Pin a version
+with `SOAP_VERSION=v0.1.0` or change the target dir with `SOAP_INSTALL_DIR`. On any
+other platform, install from PyPI instead: `uv tool install soap-tui`.
+
+> **Note:** the installer needs a published Release to download from. Until the
+> first release is cut, use the `uv` methods above.
+
 ### First-time setup: `soap init`
 
 ```bash

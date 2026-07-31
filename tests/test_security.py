@@ -94,6 +94,40 @@ def test_shell_block_quotes_hostile_paths_without_execution(
     assert not marker.exists()
 
 
+def test_fish_backslash_before_quote_does_not_execute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A backslash immediately before a quote must not close the fish string."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    marker = tmp_path / "command-executed"
+    hostile = tmp_path / ("lib\\'; touch " + str(marker) + " '")
+
+    result = write_shell_export("fish", hostile)
+
+    assert result.status == "added"
+    assert not marker.exists()
+    assert result.export_line == "set -gx SOAP_DIR='" + str(hostile).replace(
+        "\\", "\\\\"
+    ).replace("'", "\\'") + "'"
+
+    if shutil.which("fish"):
+        sourced = subprocess.run(
+            [
+                "fish",
+                "-c",
+                'source $argv[1]; printf "%s" $SOAP_DIR',
+                "soap-test",
+                str(result.config_path),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert sourced.returncode == 0, sourced.stderr
+        assert sourced.stdout == str(hostile)
+    assert not marker.exists()
+
+
 def test_unknown_shell_fallback_is_safe_to_source(tmp_path: Path):
     marker = tmp_path / "command-executed"
     hostile = tmp_path / f"lib; touch {marker}\n$(touch {marker})"

@@ -25,7 +25,7 @@ def _quote_fish(value: str) -> str:
     """
     if "\x00" in value:
         raise ValueError("SOAP_DIR contains a NUL byte")
-    return "'" + value.replace("'", "\\'") + "'"
+    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
 def export_line(shell: str, soap_dir: Path) -> str:

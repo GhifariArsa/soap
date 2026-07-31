@@ -42,6 +42,14 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - **Testing:** `uv run pytest`. TUI is covered with Textual's pilot via `asyncio.run`
   (`tests/test_tui_review.py`, `tests/test_themes.py`) — no pytest-asyncio plugin.
 
+- **Packaging:** PyPI dist name is **`soap-tui`** (plain `soap` is taken) but the
+  installed command stays **`soap`** via `[project.scripts]` — never conflate them.
+  Version is **dynamic via hatch-vcs** from `v*` git tags, written to the gitignored
+  `soap/_version.py` at build time; no tag → a `0.1.devN+...` version (expected).
+  `soap --version` (`soap/main.py`) resolves `importlib.metadata.version("soap-tui")`
+  then falls back to `soap/_version.py` then `"0.0.0+unknown"`. Build/verify with
+  `uv build` (emits `soap_tui-*` wheel + sdist).
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

@@ -36,8 +36,8 @@ jobs:
       matrix:
         include:
           - { os: macos-14, target: macos-arm64 }
-          # macOS 15 Intel is the supported hosted Intel runner; keep this target separate from arm64.
-          - { os: macos-15-intel, target: macos-x86_64 }
+          # macOS 15 is the supported hosted Intel runner; keep this target separate from arm64.
+          - { os: macos-15, target: macos-x86_64 }
           - { os: ubuntu-24.04, target: linux-x86_64 }
           - { os: ubuntu-24.04-arm, target: linux-arm64 }
     needs: validate

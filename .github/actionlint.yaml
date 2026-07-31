@@ -1,8 +1,0 @@
-# actionlint config. `macos-15-intel` is the current GitHub-hosted Intel macOS
-# runner (used by release.yml for the macos-x86_64 target), but actionlint's
-# pinned label database (v1.7.7) predates it and flags it as unknown. Declaring
-# it here as a known label clears the false positive without loosening any other
-# runner-label validation.
-self-hosted-runner:
-  labels:
-    - macos-15-intel

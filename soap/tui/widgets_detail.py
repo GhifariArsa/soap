@@ -7,8 +7,12 @@ through :func:`soap.tui._markup.sep` so styled labels never mash into their
 values.
 """
 
+from typing import ClassVar
+
 from rich.markup import escape
+from textual.binding import Binding
 from textual.containers import VerticalScroll
+from textual.events import Blur, Focus
 from textual.widgets import Static
 
 from soap.models.document import Document, ReviewStatus
@@ -34,15 +38,46 @@ def _author_summary(authors: list[str]) -> str:
 class DetailPane(VerticalScroll):
     """The right pane: full metadata for the selected document."""
 
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("j", "detail_scroll_down", "Scroll down", show=False),
+        Binding("k", "detail_scroll_up", "Scroll up", show=False),
+    ]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._document: Document | None = None
+
     def compose(self):
         yield Static("", id="detail-body")
 
     def show(self, document: Document | None) -> None:
+        self._document = document
         body = self.query_one("#detail-body", Static)
         if document is None:
             body.update("[$text-muted]Nothing selected[/]")
+        else:
+            body.update(self._to_markup(document))
+        self.scroll_home(animate=False)
+
+    def on_focus(self, _event: Focus) -> None:
+        self._rerender()
+
+    def on_blur(self, _event: Blur) -> None:
+        self._rerender()
+
+    def _rerender(self) -> None:
+        if self._document is None:
             return
-        body.update(self._to_markup(document))
+        self.query_one("#detail-body", Static).update(
+            self._to_markup(self._document)
+        )
+        self.scroll_home(animate=False)
+
+    def action_detail_scroll_down(self) -> None:
+        self.scroll_down(animate=False)
+
+    def action_detail_scroll_up(self) -> None:
+        self.scroll_up(animate=False)
 
     def _to_markup(self, doc: Document) -> str:
         lines: list[str] = [f"[b $primary]{escape(doc.title or '—')}[/]"]

@@ -27,7 +27,8 @@ from textual.widgets import DataTable, Input, ListView, Static
 
 from soap.config import load_config, save_theme
 from soap.db.documents import DocumentService
-from soap.library import Library, edit_document
+from soap.library import Library, edit_document, set_read_status
+from soap.models.document import ReadStatus
 from soap.tui._markup import key, sep
 from soap.tui.review import ReviewScreen
 from soap.tui.tags import TagEditScreen
@@ -55,6 +56,7 @@ def _cheatbar(inbox: int) -> str:
             key("enter", "open"),
             key("/", "find"),
             key("t", "tags"),
+            key("m", "mark"),
             review,
             key("tab", "pane"),
             key("?", "keys"),
@@ -112,6 +114,7 @@ class HelpScreen(ModalScreen[None]):
                 ("enter / o", "open file"),
                 ("/", "search"),
                 ("t", "edit tags"),
+                ("m", "cycle read status"),
                 ("r", "review inbox"),
             ],
         ),
@@ -178,6 +181,7 @@ class SoapApp(App):
         Binding("r", "review", "review inbox", show=False),
         Binding("t", "edit_tags", "edit tags", show=False),
         Binding("e", "edit_metadata", "edit metadata", show=False),
+        Binding("m", "cycle_read_status", "cycle read status", show=False),
         Binding("question_mark", "help", "help", show=False, key_display="?"),
         Binding("tab", "focus_pane(1)", "Next pane", show=False),
         Binding("shift+tab", "focus_pane(-1)", "Prev pane", show=False),
@@ -266,17 +270,25 @@ class SoapApp(App):
 
     # -- data flow ---------------------------------------------------------
 
-    def refresh_data(self) -> None:
+    def refresh_data(self, selected_id: str | None = None) -> None:
         """Rebuild sidebar + inbox pill + footer + list from the database."""
         if self.docs is None:
             return
         counts = self.docs.library_counts()
-        self.query_one(Sidebar).build(
-            counts, self.docs.tag_counts(), self.docs.collection_counts()
-        )
+        sidebar = self.query_one(Sidebar)
+        sidebar.build(counts, self.docs.tag_counts(), self.docs.collection_counts())
+        # Rebuilding counts must not silently reset the active filter to All.
+        for index, item in enumerate(sidebar.children):
+            if (
+                isinstance(item, SidebarRow)
+                and item.kind == self.filter_kind
+                and item.value == self.filter_value
+            ):
+                sidebar.index = index
+                break
         self._inbox = counts["inbox"]
         self._update_inbox()
-        self._populate_list()
+        self._populate_list(selected_id=selected_id)
 
     def _update_inbox(self) -> None:
         pill = self.query_one("#inboxpill", Static)
@@ -291,7 +303,7 @@ class SoapApp(App):
             pill.display = False
         self.query_one("#cheatbar", Static).update(_cheatbar(self._inbox))
 
-    def _populate_list(self) -> None:
+    def _populate_list(self, selected_id: str | None = None) -> None:
         if self.docs is None:
             return
         rows = self.docs.list_documents(
@@ -300,7 +312,9 @@ class SoapApp(App):
             search=self.search_term or None,
         )
         doclist = self.query_one(DocumentList)
-        doclist.populate(rows)
+        if selected_id is None:
+            selected_id = doclist.current_id
+        doclist.populate(rows, selected_id=selected_id)
         if self.filter_kind == "tag" and self.filter_value:
             title = f"# {self.filter_value}"
         elif self.filter_kind == "collection" and self.filter_value:
@@ -375,6 +389,26 @@ class SoapApp(App):
         else:
             self.notify("no file attached to this document", severity="warning")
             return
+
+    def action_cycle_read_status(self) -> None:
+        """Cycle the selected document unread -> reading -> read."""
+        doclist = self.query_one(DocumentList)
+        doc_id = doclist.current_id
+        if self.docs is None or doc_id is None:
+            return
+        document = self.docs.get_document(doc_id)
+        if document is None:
+            return
+        statuses = (
+            ReadStatus.UNREAD.value,
+            ReadStatus.READING.value,
+            ReadStatus.READ.value,
+        )
+        next_status = statuses[(statuses.index(document.read_status) + 1) % len(statuses)]
+        set_read_status(self.library, doc_id, next_status, self.docs)
+        self.refresh_data(selected_id=doc_id)
+        self._show_detail(doc_id)
+        self.notify(f"marked {next_status}")
 
     def action_review(self) -> None:
         if self.docs is None:

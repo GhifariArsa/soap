@@ -142,7 +142,7 @@ class DocumentList(DataTable):
 
     # -- population ---------------------------------------------------------
 
-    def populate(self, rows: list[DocumentRow]) -> None:
+    def populate(self, rows: list[DocumentRow], selected_id: str | None = None) -> None:
         self.clear()
         self._ids = []
         muted = self._color("text-muted")
@@ -180,7 +180,8 @@ class DocumentList(DataTable):
             self.add_row(gtxt, ttxt, atxt, vtxt, ytxt, key=row.id, height=1)
             self._ids.append(row.id)
         if self._ids:
-            self.move_cursor(row=0)
+            row = self._ids.index(selected_id) if selected_id in self._ids else 0
+            self.move_cursor(row=row)
         self.call_after_refresh(self._fit_title)
 
     @property

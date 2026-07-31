@@ -1,409 +1,233 @@
 # soap
 
-**S**imple **O**rganisation **A**pp — a reference and document manager for the terminal.
+**soap** is a terminal reference manager for papers, books, and PDFs. Add a local
+file, DOI, arXiv ID, ISBN, directory, or URL; fetch metadata; review uncertain
+records; then browse, search, tag, and open your library from a keyboard-driven TUI.
 
-soap keeps a personal library of papers, books, and PDFs on disk in a form you can
-read, grep, and version-control: every document is a plain `info.yaml` file, and a
-SQLite index (rebuildable from those files) makes the library fast to browse and
-search. Add documents from a local file or an identifier (DOI, arXiv, ISBN), let soap
-fetch the metadata, and confirm anything it isn't sure about through a `needs_review`
-inbox. Browse it all in a keyboard-driven TUI.
+![The soap library browser](docs/screens/after-01-library.png)
 
-![The soap library browser (Aqua Slate theme)](docs/screens/after-01-library.png)
+## Quick start
 
-## Why soap
+### Install
 
-- **Your files stay yours.** The on-disk `info.yaml` is the source of truth. The
-  database is just an index — delete it and it rebuilds. Nothing is locked in a
-  proprietary store.
-- **Metadata you can trust.** Every add records *where* its metadata came from and a
-  confidence score. Low-confidence adds land in a review queue instead of silently
-  polluting your library.
-- **CLI and TUI, one library.** Script bulk imports on the command line; browse and
-  review interactively in the TUI. Both operate on the same files.
+soap needs [uv](https://docs.astral.sh/uv/) and Python **3.14 or newer**.
 
----
-
-## Requirements
-
-- [**uv**](https://docs.astral.sh/uv/) — used to manage the environment and run soap.
-- **Python ≥ 3.14** (uv will fetch it for you if needed).
-
-## Install & run
-
-soap runs straight from a checkout with `uv`:
+The simplest way to try the project is from a checkout:
 
 ```bash
-git clone <this-repo> soap
+git clone https://github.com/GhifariArsa/soap.git
 cd soap
-uv run soap --help
+uv run soap init
 ```
 
-`uv run soap …` resolves dependencies and runs the `soap` entry point
-(`soap = "soap.main:app"`). Every command below is invoked that way.
+For a published release, install the `soap-tui` package with uv:
 
-### Install a standalone binary
+```bash
+uv tool install soap-tui
+```
 
-Once a [GitHub Release](https://github.com/GhifariArsa/soap/releases) is published,
-a single command downloads the right binary for your platform, verifies its
-checksum, and drops it in `~/.local/bin`:
+Standalone binaries are also published for macOS (arm64 and x86_64) and Linux
+(arm64 and x86_64) with each GitHub Release. The installer verifies the download
+before placing `soap` in `~/.local/bin`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/GhifariArsa/soap/main/install.sh | sh
 ```
 
-Supported targets: macOS (arm64, x86_64) and Linux (x86_64, arm64). Pin a version
-with `SOAP_VERSION=v0.1.0` or change the target dir with `SOAP_INSTALL_DIR`. On any
-other platform, install from PyPI instead: `uv tool install soap-tui`.
+The installer requires a published release. Use `SOAP_VERSION=v0.1.0` to pin a
+release or `SOAP_INSTALL_DIR` to change the install directory. Before the first
+release, use the checkout or PyPI instructions above.
 
-> **Note:** the installer needs a published Release to download from. Until the
-> first release is cut, use the `uv` methods above.
+### Add and review one paper
 
-### First-time setup: `soap init`
-
-```bash
-uv run soap init
-```
-
-`soap init` prepares a machine to use soap. It:
-
-1. Creates the library directory (default `~/.soap`, see [The library](#the-library)),
-   with `inbox/` and `documents/` subfolders.
-2. Writes a starter `config.yaml` with `always_review: true` (never overwriting an
-   existing one).
-3. Creates and initializes the SQLite index (`soap.db`).
-4. Appends an `export SOAP_DIR=…` line to your shell config so soap always finds the
-   same library.
-
-```
-✓ config       ~/.soap/config.yaml (always_review: true)
-✓ library      ~/.soap
-✓ created      inbox/ documents/
-✓ database     soap.db (schema v1)
-✓ shell        added SOAP_DIR to ~/.zshrc
-
-Run `source ~/.zshrc` or open a new terminal to load SOAP_DIR.
-```
-
-Useful flags:
-
-| Flag | Effect |
-|------|--------|
-| `--path <dir>` | Initialize the library at `<dir>` instead of the default. Overrides `$SOAP_DIR`. |
-| `--shell auto\|zsh\|bash\|fish` | Which shell config to write the `SOAP_DIR` export into (`auto` detects `$SHELL`). |
-| `--force` | Reinitialize even if a library already exists (backs up the old database first; **destructive**). |
-
-Re-running `init` is idempotent: it never clobbers an existing `config.yaml` or
-database unless you pass `--force`.
-
----
-
-## Core concepts
-
-### The library
-
-A soap library is a single directory, resolved in this order:
-
-1. `--path <dir>` on the command (highest priority).
-2. `$SOAP_DIR` from the environment.
-3. `~/.soap` (the default).
-
-Inside it:
-
-```
-$SOAP_DIR/
-├── config.yaml                 # library configuration
-├── soap.db                     # SQLite index (rebuildable)
-├── inbox/                       # staging area
-└── documents/
-    └── vaswani2017attention/    # one folder per document, named by citekey
-        ├── info.yaml            # the authoritative record
-        └── att.pdf              # the attached file(s)
-```
-
-**Disk is the source of truth.** Every mutation rewrites `documents/<id>/info.yaml`
-first, then re-syncs the SQLite index. The index holds a denormalized copy of each
-document plus its authors, tags, collections, and files for fast listing and search —
-it can always be rebuilt from the `info.yaml` files.
-
-### Documents
-
-Each document is one `info.yaml` record. A typical file:
-
-```yaml
-# authors is a YAML list, one entry per line, each in "Last, First" form.
-id: vaswani2017attention
-type: article
-title: Attention Is All You Need
-year: 2017
-authors:
-- Vaswani, Ashish
-venue: null
-doi: null
-arxiv_id: null
-isbn: null
-added_at: '2026-07-31T07:18:23Z'
-read_status: unread          # unread | reading | read
-source: manual               # crossref | arxiv | openlibrary | manual | local
-confidence: 0.8
-review_status: needs_review  # filed | needs_review
-tags: []
-collections: []
-files:
-- path: documents/vaswani2017attention/att.pdf
-  mime: application/pdf
-  sha256: 2d711642…
-```
-
-### Citekeys
-
-The document `id` is a citekey of the form `{lastname}{year}{titleword}`
-(e.g. `vaswani2017attention`), derived from the resolved metadata and made unique and
-filesystem-safe. It names the document's folder. A brand-new `add` derives a fresh
-citekey; correcting a document during review **keeps** the existing key (the folder is
-never renamed).
-
-### Source & confidence
-
-Every document records how its metadata was resolved and a confidence score for that
-source:
-
-| Source | Confidence | Where the metadata came from |
-|--------|-----------:|------------------------------|
-| `crossref` | 0.95 | Crossref (via DOI) |
-| `arxiv` | 0.90 | arXiv |
-| `openlibrary` | 0.90 | Open Library (via ISBN) |
-| `manual` | 0.80 | Fields you supplied on the command line |
-| `local` | 0.30 | Guessed from the local file alone, no network match |
-
-Metadata is never scraped from PDF contents — it comes from an authoritative source or
-from you.
-
-### The `needs_review` inbox
-
-An added document is either **filed** (`review_status: filed`) or flagged
-**needs_review**. Everything flagged for review forms the inbox — a queue of documents
-awaiting a human's confirmation before they're considered filed. Because the shipped
-default is `always_review: true`, *every* add goes through the inbox until you turn that
-off (see [Configuration](#configuration)); the review queue is the primary add path.
-
----
-
-## CLI usage
-
-### `soap add` — add documents
-
-Add one or many documents from a file, a directory, or a URL:
+From the repository, prefix commands with `uv run`; an installed copy uses
+`soap` directly.
 
 ```bash
-# From a local PDF, with metadata you supply (no network lookup)
-uv run soap add ~/papers/attention.pdf \
-    --no-fetch \
-    --title "Attention Is All You Need" \
-    --author "Vaswani, Ashish" --author "Shazeer, Noam" \
-    --year 2017
+# An arXiv ID resolves metadata and best-effort downloads its PDF.
+uv run soap add 1706.03762
 
-# By identifier — soap fetches the metadata for you
-uv run soap add paper.pdf --doi 10.1145/3292500.3330701
-uv run soap add preprint.pdf --arxiv 1706.03762
-uv run soap add scan.pdf --isbn 978-0-13-468599-1   # book metadata via Open Library
-
-# A whole folder at once
-uv run soap add ~/papers/ --recursive
-```
-
-Output is one row per source plus a summary:
-
-```
-! vaswani2017attention     Attention Is All You Need (2017)       manual, needs review
-
-1 added, 1 needs review
-```
-
-Key options (`uv run soap add --help` for the full list):
-
-| Flag | Effect |
-|------|--------|
-| `--title`, `--year`, `--type` | Override the corresponding field. `--type` is a BibTeX type (`article`, `inproceedings`, `book`, …). |
-| `--author "Last, First"` | Add an author. Repeatable and ordered. |
-| `--doi`, `--arxiv`, `--isbn` | Supply an identifier directly (skips detection); `--isbn` fetches book metadata from Open Library. |
-| `--tag`, `--collection` | Attach a tag / collection. Repeatable. |
-| `--no-fetch` | Skip all network lookups (Crossref / arXiv / Open Library). |
-| `--recursive` | Recurse into subfolders when a source is a directory. |
-| `--confirm` | Walk the core fields inline (prefilled) before saving — see the review walk below. |
-| `--edit`, `-e` | Open the generated `info.yaml` in `$EDITOR` before saving. |
-| `--dry-run` | Show what would be added; write nothing. |
-| `--force` | Add even if a duplicate is detected. |
-| `--path <dir>` | Operate on the library at `<dir>` (overrides `$SOAP_DIR`). |
-
-### `soap inbox review` — work the inbox
-
-Walk the `needs_review` queue one document at a time:
-
-```bash
+# Fresh `soap init` routes adds through the review queue.
 uv run soap inbox review
-```
 
-```
-[1/1] needs review
-  citekey  vaswani2017attention
-  title    Attention Is All You Need
-  authors  Vaswani, Ashish
-  year     2017
-  id       —
-  source   manual   confidence 0.80   file yes
-  [a]ccept · [c]orrect · [e]$EDITOR · [s]kip · [d]elete · [q]uit:
-```
-
-Actions:
-
-- **`a` accept** — file the document as-is.
-- **`c` correct** — walk the core fields (title, authors, year, type, venue)
-  field-by-field. Each field is prefilled with the detected value: press **Enter** to
-  keep it, or type to override. Authors are entered as a single **`;`-separated** list
-  (e.g. `Vaswani, Ashish; Shazeer, Noam`). Correcting a document keeps its citekey and
-  folder.
-- **`e` $EDITOR** — open the raw `info.yaml` in `$EDITOR` for a full edit.
-- **`s` skip** — leave it in the inbox for later.
-- **`d` delete** — remove the document and its file(s) (asks for confirmation).
-- **`q` quit** — stop; the tally so far is reported.
-
-The interactive walk is shared verbatim by the CLI, the TUI, and `soap add --confirm`,
-so it behaves identically everywhere.
-
----
-
-## TUI usage
-
-Launch the TUI by running `soap` with no command:
-
-```bash
+# Then browse the library.
 uv run soap
 ```
 
-The interface has three panes — a **browse sidebar** (all / inbox / to-read / reading,
-plus tags and collections), a **document list**, and a **detail** pane — over a top bar
-(brand + search + an amber inbox pill when the inbox is non-empty) and a persistent
-cheat-bar footer.
+For a local PDF, supply an identifier or metadata yourself:
 
-![The soap library browser](docs/screens/after-01-library.png)
-
-### Keyboard model
-
-| Key | Action |
-|-----|--------|
-| `j` / `k` | Move down / up in the focused pane |
-| `g` / `G` | Jump to top / bottom |
-| `Ctrl-D` / `Ctrl-U` | Half-page down / up |
-| `tab` / `shift+tab` | Cycle panes |
-| `h` / `l` | Focus left / right pane |
-| `enter` / `o` | Open the highlighted document's file with the OS default handler |
-| `/` | Search title, author, tag, DOI (Enter/Down/Tab focus the list keeping the query, Escape clears it) |
-| `m` | Cycle the highlighted document's read status (unread → reading → read) |
-| `r` | Review the inbox (opens the review screen) |
-| `?` | Keyboard reference (help overlay) |
-| `Ctrl-P` | Command palette (search every command by name) |
-| `Ctrl-T` | Cycle the theme |
-| `Ctrl-R` | Refresh from disk |
-| `q` | Quit |
-
-### Reviewing in the TUI
-
-Press **`r`** (or click the amber inbox pill) to open the review screen — the same
-accept / correct / edit / skip / delete flow as `soap inbox review`, driven with the
-keyboard. Filed and skipped counts are reported back when you finish.
-
----
-
-## Themes
-
-The TUI ("Aqua Slate") is fully themeable — every widget draws from theme *slots*, so a
-theme change reskins the whole app: list, detail, review form, help, footer, borders,
-and selection.
-
-Three themes ship with soap:
-
-| Name | Look |
-|------|------|
-| `aqua-slate` | **Default.** Slate + teal focus, amber attention |
-| `one-dark` | Atom One Dark |
-| `catppuccin-mocha` | Catppuccin Mocha |
-
-| One Dark | Catppuccin Mocha |
-|----------|------------------|
-| ![One Dark theme](docs/screens/after-08-onedark.png) | ![Catppuccin Mocha theme](docs/screens/after-09-catppuccin.png) |
-
-**Switch at runtime** with **`Ctrl-T`** (cycle) or **`Ctrl-P` → Change theme** (the
-command palette's picker). Your choice is written back to `config.yaml` and remembered
-across restarts.
-
-**Pick the startup theme** with the `theme:` key in `config.yaml`:
-
-```yaml
-theme: catppuccin-mocha
+```bash
+uv run soap add ~/papers/paper.pdf --doi 10.1145/3292500.3330701
+# Or work completely offline:
+uv run soap add ~/papers/paper.pdf --no-fetch \
+  --title "Attention Is All You Need" \
+  --author "Vaswani, Ashish" --year 2017
 ```
 
-An unknown name simply falls back to the default.
+`soap add --help` and `soap inbox review --help` show the complete option lists.
 
-**Add your own theme** by dropping a YAML file into `$SOAP_DIR/themes/`. soap discovers
-it on launch; it then shows up in the `Ctrl-T` cycle and the `Ctrl-P` picker. Only
-`name` is required — every color role falls back to the Aqua Slate value, so a handful
-of overrides is enough. A broken theme file is skipped with a warning toast; it never
-stops the app. See **[`docs/themes.md`](docs/themes.md)** for the full format and
-**[`docs/example-theme.yaml`](docs/example-theme.yaml)** for a commented starting point.
+## The workflow
 
----
+1. **Initialize once.** `soap init` creates the library, its SQLite index, and a
+   shell export for `SOAP_DIR`.
+2. **Add sources.** Use `soap add` with a file, directory, DOI, arXiv ID, ISBN, or
+   URL. Repeat `--author`, `--tag`, or `--collection` when needed; use
+   `--recursive` for a directory.
+3. **Review.** `soap inbox review` or the TUI's `r` action lets you accept, correct,
+   edit, or skip each `needs_review` record. The CLI also supports deleting a
+   record. `--confirm` provides the same guided field correction during `add`.
+4. **Browse.** Run `soap` with no subcommand. Use the sidebar for all documents,
+   the review inbox, read status, tags, and collections; use `/` to search.
+5. **Open and mark.** `enter`/`o` opens the first attached file (or the recorded URL)
+   with the operating system's default handler. `m` cycles unread → reading → read.
 
-## Configuration
+Metadata lookups use Crossref, arXiv, or Open Library as appropriate. arXiv and
+direct-PDF URLs download a PDF on a best-effort basis; an open-access DOI may do the
+same. A paywall or failed download does not prevent metadata from being saved. soap
+does **not** parse PDF contents.
 
-Library configuration lives in `$SOAP_DIR/config.yaml`. Both keys are optional — a
-missing, empty, or malformed file falls back to defaults rather than erroring.
+## Usage
 
-| Key | Type | Default | Meaning |
-|-----|------|---------|---------|
-| `always_review` | bool | `false` (`true` in a fresh `soap init`) | When true, **every** add is routed into the `needs_review` inbox regardless of confidence, so a human confirms it before it's filed. |
-| `theme` | string | *(shipped default)* | Startup TUI theme — a bundled name (`aqua-slate`, `one-dark`, `catppuccin-mocha`) or a user theme from `$SOAP_DIR/themes/`. soap rewrites this line when you switch themes in the app. |
+### `soap init`
 
-```yaml
-# $SOAP_DIR/config.yaml
-always_review: true
-theme: aqua-slate
+```bash
+soap init
 ```
 
----
+The default library is `~/.soap`. `SOAP_DIR` changes the default, and `--path <dir>`
+overrides both. `init` creates `config.yaml`, `inbox/`, `documents/`, and `soap.db`,
+and writes a quoted `SOAP_DIR` export to the detected shell config (or prints a safe
+export line when no shell can be detected).
+
+Useful options:
+
+| Option | Use |
+| --- | --- |
+| `--path <dir>` | Initialize a different library. |
+| `--shell auto\|zsh\|bash\|fish` | Choose the shell config to update. |
+| `--force` | Reinitialize an existing library; destructive, but backs up the old database. |
+
+A fresh library sets `always_review: true` in `config.yaml`. Re-running `init` does
+not overwrite an existing configuration.
+
+### `soap add`
+
+```bash
+soap add SOURCE...
+```
+
+`SOURCE` can be a local file, directory, URL, DOI, or bare arXiv ID. ISBN metadata
+can be supplied with `--isbn`. Identifiers can also be passed explicitly with
+`--doi` or `--arxiv`.
+
+The options most people need are:
+
+| Option | Use |
+| --- | --- |
+| `--title`, `--author`, `--year`, `--type` | Override metadata. `--author` is repeatable. |
+| `--tag`, `--collection` | Add repeatable tags or collections. |
+| `--no-fetch` | Skip network metadata lookups. |
+| `--recursive` | Include files below a directory source. |
+| `--confirm` | Correct the core fields inline before saving. |
+| `--edit`, `-e` | Edit the generated `info.yaml` in `$EDITOR`. |
+| `--dry-run` | Preview the add without writing anything. |
+| `--force` | Add even when a duplicate is detected. |
+| `--path <dir>` | Use a library other than `$SOAP_DIR` or `~/.soap`. |
+
+### `soap inbox review`
+
+```bash
+soap inbox review
+```
+
+The CLI presents one record at a time:
+
+- `a` — accept it as-is
+- `c` — correct title, authors, year, type, or venue; Enter keeps a value
+- `e` — open the complete `info.yaml` in `$EDITOR`
+- `s` — skip it for later
+- `d` — delete it and its attached files, after confirmation
+- `q` — quit the walk
+
+The TUI review screen uses the same review core. In that screen, `enter`/`a` files,
+`c` corrects, `e` opens `$EDITOR`, `s` skips, and `q`/`esc` finishes the review.
+
+### TUI keymap
+
+Run `soap` with no subcommand to open the TUI. Press `?` at any time for the
+in-app keyboard reference; the following is the compact map for the main screen.
+
+| Keys | Action |
+| --- | --- |
+| `j` / `k`, `g` / `G` | Move; jump to top / bottom. |
+| `Ctrl-D` / `Ctrl-U` | Half-page down / up. |
+| `Tab` / `Shift-Tab`, `h` / `l` | Cycle panes; focus left / right. |
+| `Enter` / `o` | Open the selected file or URL. |
+| `/` | Search title, author, tag, or DOI; Enter/Tab moves to the list. |
+| `e` | Edit the selected document's metadata in `$EDITOR`. |
+| `t` | Edit tags. In the tag editor, Enter/comma adds, Tab completes, `Ctrl-S` saves, and `Esc` cancels. |
+| `m` | Cycle read status: unread → reading → read. |
+| `r` | Review the inbox. |
+| `Ctrl-R` | Refresh from disk. |
+| `?` / `Ctrl-P` | Keyboard reference / command palette. |
+| `Ctrl-T` | Cycle themes. |
+| `q` | Quit. |
+
+### Tags and themes
+
+Tags are edited from the selected document with `t` and can be used as sidebar
+filters. The TUI ships with `aqua-slate`, `one-dark`, and `catppuccin-mocha` themes.
+`Ctrl-T` cycles them, and the choice is saved in `config.yaml`. User themes live in
+`$SOAP_DIR/themes/`.
+
+See [the theme format](docs/themes.md) and the
+[example theme](docs/example-theme.yaml) for customization details.
+
+## Your library on disk
+
+The library path is resolved in this order:
+
+1. `--path <dir>` where that option is available (`init`, `add`, and `inbox review`)
+2. `$SOAP_DIR`
+3. `~/.soap`
+
+Its important files look like this:
+
+```text
+$SOAP_DIR/
+├── config.yaml
+├── soap.db                         # rebuildable SQLite index
+├── inbox/                          # library directory created by init
+└── documents/
+    └── <citekey>/
+        ├── info.yaml               # authoritative document record
+        └── paper.pdf               # attached file(s), if any
+```
+
+`info.yaml` is the **source of truth**. Every change writes the document file first,
+then synchronizes the SQLite index; the index is only a fast, denormalized view of
+the files and metadata. The TUI and CLI therefore read and mutate the same library,
+and the on-disk record remains readable and version-controllable without the index.
+
+The review **inbox is a `needs_review` status**, not a second copy of the document:
+records and their attachments stay under `documents/<citekey>/` until they are filed,
+skipped, or deleted. A new citekey names both the document folder and its `info.yaml`.
+Correcting a record during review keeps that citekey; only a new add derives a key.
+
+## More
+
+- [Usage reference](#usage)
+- [TUI keymap](#tui-keymap)
+- [Release and publishing guide](docs/releasing.md)
+- [GitHub Releases](https://github.com/GhifariArsa/soap/releases)
+- [Project homepage](https://github.com/GhifariArsa/soap)
 
 ## Development
 
-Run the test suite with:
+Run the tests with:
 
 ```bash
 uv run pytest
 ```
 
-The TUI is tested headlessly with Textual's pilot (no terminal or pytest-asyncio
-plugin required), and the shared review core is unit-tested without a terminal by
-injecting its IO.
-
-### Project layout
-
-```
-soap/
-├── main.py              # Typer app + entry point; bare `soap` launches the TUI
-├── library.py           # library model, add/edit/review core, SOAP_DIR resolution
-├── config.py            # config.yaml loader + theme persistence
-├── shell.py             # SOAP_DIR shell-export writer
-├── cli/                 # thin command shims: init, library (add), inbox (review)
-├── ingest/              # metadata fetch/merge, identifier + URL handling, citekeys
-├── models/document.py   # the Document schema (Pydantic)
-├── db/                  # SQLite index (schema + DocumentService)
-└── tui/                 # Textual app, widgets, review screen, themes
-docs/
-├── themes.md            # theme format reference
-├── example-theme.yaml   # commented custom-theme starting point
-└── screens/             # TUI reference screenshots
-```
-
-The interactive review walk is IO-injected (`soap/library.py:review_inbox`), so the
-CLI (`soap/cli/inbox.py`) and TUI (`soap/tui/review.py`) are thin shims over one shared
-core — keep their behavior consistent. See [`CLAUDE.md`](CLAUDE.md) for the full set of
-architecture invariants.
+The package distribution is named `soap-tui`; the installed command is `soap`.

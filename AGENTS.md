@@ -9,7 +9,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - **Disk is the source of truth.** Every mutation rewrites `documents/<id>/info.yaml`
   first, then re-syncs the SQLite index (rebuildable). Write through the helpers in
   `soap/library.py` (`save_document`, `set_review_status`, `set_read_status`,
-  `edit_document`, `delete_document`), never the DB directly.
+  `edit_document`, `delete_document`), never the DB directly. Those helpers validate
+  document IDs and file references at the library boundary, and metadata YAML
+  replacement is atomic; `resolve_file_ref_path` is also the TUI open boundary.
 - **Library paths are owner-private; shell exports are quoted.** Anything a
   library owns is forced to `0700`/`0600` after it is created or copied via
   `soap/permissions.py:make_private` (source files keep their original mode

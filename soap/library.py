@@ -1,11 +1,13 @@
+import errno
 import hashlib
 import mimetypes
 import os
 import re
 import shutil
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import httpx
 import yaml
@@ -123,6 +125,124 @@ class Library:
 # to confirm, and writes disk then DB: folder -> info.yaml -> DB row.
 
 SUPPORTED_SUFFIXES = {".pdf"}
+
+
+class LibraryPathError(ValueError):
+    """A path or document id would escape the library boundary."""
+
+
+class IndexSyncError(RuntimeError):
+    """Disk metadata committed, but SQLite index maintenance failed."""
+
+    def __init__(self, document_id: str, cause: Exception):
+        super().__init__(str(cause))
+        self.document_id = document_id
+        self.cause = cause
+
+
+def _library_roots(library: "Library") -> tuple[Path, Path]:
+    """Return resolved library/document roots, rejecting an escaped document root."""
+    try:
+        root = library.path.resolve(strict=False)
+        documents = library.documents.resolve(strict=False)
+        documents.relative_to(root)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise LibraryPathError(
+            f"document root escapes the library: {library.documents}"
+        ) from exc
+    return root, documents
+
+
+def _resolve_inside(path: Path, root: Path, label: str) -> Path:
+    """Resolve a path and require it to remain below a trusted root."""
+    try:
+        resolved = path.resolve(strict=False)
+        resolved.relative_to(root)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise LibraryPathError(f"{label} escapes the library boundary: {path}") from exc
+    return resolved
+
+
+def _validate_document_id(library: "Library", doc_id: str) -> Path:
+    """Validate an id as one safe directory name below ``documents``."""
+    if not isinstance(doc_id, str) or not doc_id.strip():
+        raise LibraryPathError("document id must be a non-empty string")
+    if "\x00" in doc_id or doc_id in {".", ".."}:
+        raise LibraryPathError(f"invalid document id: {doc_id!r}")
+
+    # IDs are directory names, not paths. Check both path syntaxes so a
+    # library copied between POSIX and Windows cannot reinterpret an id.
+    posix = PurePosixPath(doc_id)
+    windows = PureWindowsPath(doc_id)
+    if (
+        posix.is_absolute()
+        or windows.is_absolute()
+        or windows.drive
+        or "/" in doc_id
+        or "\\" in doc_id
+    ):
+        raise LibraryPathError(f"document id is not a safe directory name: {doc_id!r}")
+
+    _, document_root = _library_roots(library)
+    folder = library.documents / doc_id
+    try:
+        _resolve_inside(folder, document_root, "document id")
+    except LibraryPathError as exc:
+        raise LibraryPathError(
+            f"document id resolves outside the document root: {doc_id!r}"
+        ) from exc
+    return folder
+
+
+def resolve_file_ref_path(
+    library: "Library", doc_id: str, file_ref: FileRef
+) -> Path:
+    """Validate and resolve a file reference without allowing boundary escapes.
+
+    File references are relative to the library root. Resolution follows existing
+    symlinks, so a reference that points outside the library is rejected even if
+    its textual form looks relative.
+    """
+    _validate_document_id(library, doc_id)
+    raw = file_ref.path if isinstance(file_ref, FileRef) else None
+    if not isinstance(raw, str) or not raw:
+        raise LibraryPathError("file reference path must be a non-empty string")
+    if "\x00" in raw:
+        raise LibraryPathError("file reference path contains NUL")
+
+    posix = PurePosixPath(raw)
+    windows = PureWindowsPath(raw)
+    if (
+        raw.startswith(("/", "\\"))
+        or posix.is_absolute()
+        or windows.is_absolute()
+        or windows.drive
+        or "\\" in raw
+        or ".." in posix.parts
+    ):
+        raise LibraryPathError(f"file reference path is unsafe: {raw!r}")
+
+    root, _ = _library_roots(library)
+    candidate = library.path / raw
+    try:
+        return _resolve_inside(candidate, root, "file reference")
+    except LibraryPathError as exc:
+        raise LibraryPathError(
+            f"file reference resolves outside the library: {raw!r}"
+        ) from exc
+
+
+def _validate_document_for_library(
+    library: "Library", document: Document, *, expected_id: str | None = None
+) -> None:
+    """Validate a model before persisting or using any attached file."""
+    _validate_document_id(library, document.id)
+    if expected_id is not None and document.id != expected_id:
+        raise LibraryPathError(
+            f"document id mismatch: expected {expected_id!r}, got {document.id!r}"
+        )
+    for file_ref in document.files:
+        resolve_file_ref_path(library, document.id, file_ref)
 
 
 @dataclass
@@ -385,9 +505,20 @@ def _add_body(
     if not force and (ident_doi or ident_arxiv or ident_isbn):
         match = docs.find_by_identifier(ident_doi, ident_arxiv, ident_isbn)
         if match is not None:
-            if file_path is not None and not docs.has_file(match):
+            # The index only locates the candidate. The authoritative file list
+            # comes from info.yaml, so a recovered/damaged index cannot cause a
+            # second attachment or hide a disk-only file.
+            try:
+                existing = load_document(library, match)
+            except (OSError, ValueError, yaml.YAMLError) as exc:
+                return AddOutcome(
+                    "error", matched_id=match,
+                    message=f"could not validate existing document {match}: {exc}",
+                    warnings=warnings,
+                )
+            if file_path is not None and not existing.files:
                 return _upgrade_existing(
-                    library, docs, match, file_path, file_mime, sha,
+                    library, docs, existing, file_path, file_mime, sha,
                     original_name, move, dry_run, warnings,
                 )
             return AddOutcome(
@@ -515,7 +646,8 @@ def _add_body(
 
     # 7. Write to disk: folder -> file -> info.yaml. Roll back the folder on any
     #    failure so a half-written document never lingers.
-    folder = library.documents / citekey
+    _validate_document_for_library(library, document)
+    folder = _validate_document_id(library, citekey)
     try:
         folder.mkdir(parents=True, exist_ok=False)
         make_private(folder, directory=True)
@@ -526,9 +658,19 @@ def _add_body(
             else:
                 shutil.copy2(file_path, dest)
             make_private(dest, directory=False)
-        _write_info_yaml(folder / "info.yaml", document)
+        _write_info_yaml(info_yaml_path(library, citekey), document)
     except OSError as exc:
-        shutil.rmtree(folder, ignore_errors=True)
+        try:
+            shutil.rmtree(folder)
+        except OSError as cleanup_exc:
+            return AddOutcome(
+                "error",
+                message=(
+                    f"failed to write {citekey}: {exc}; cleanup also failed: "
+                    f"{cleanup_exc}"
+                ),
+                warnings=warnings,
+            )
         return AddOutcome(
             "error", message=f"failed to write {citekey}: {exc}", warnings=warnings,
         )
@@ -549,50 +691,135 @@ def _add_body(
 
 
 def _upgrade_existing(
-    library, docs, doc_id, file_path, file_mime, sha,
+    library, docs, existing, file_path, file_mime, sha,
     original_name, move, dry_run, warnings,
 ):
-    """Attach a newly found file to an existing metadata-only document."""
+    """Attach a file and persist the complete upgraded document disk-first."""
+    doc_id = existing.id
+    _validate_document_for_library(library, existing, expected_id=doc_id)
     if dry_run:
         return AddOutcome(
-            "upgraded", matched_id=doc_id,
+            "upgraded", document=existing, matched_id=doc_id,
             message=f"would attach file to {doc_id}",
             warnings=warnings, dry_run=True,
         )
-    folder = library.documents / doc_id
+
+    folder = _validate_document_id(library, doc_id)
     stored_name = sanitize_filename(original_name) if original_name else "document.pdf"
+    rel = Path("documents") / doc_id / stored_name
+    file_ref = FileRef(path=rel.as_posix(), mime=file_mime, sha256=sha)
+    # Validate before creating/copying anything. This also rejects a pre-existing
+    # destination symlink that would redirect a copy outside the library.
+    dest = resolve_file_ref_path(library, doc_id, file_ref)
+    updated = existing.model_copy(deep=True)
+    updated.files.append(file_ref)
+    # Attaching a real file completes the metadata-only add, matching the old
+    # attach_file behavior. The status is written to YAML as well as SQLite.
+    updated.review_status = ReviewStatus.FILED.value
+
+    moved = False
+    copied = False
     try:
         folder.mkdir(parents=True, exist_ok=True)
         make_private(folder, directory=True)
-        dest = folder / stored_name
         if move:
-            shutil.move(str(file_path), dest)
+            shutil.move(str(file_path), str(dest))
+            moved = True
         else:
             shutil.copy2(file_path, dest)
+            copied = True
         make_private(dest, directory=False)
     except OSError as exc:
         return AddOutcome(
             "error", message=f"failed to attach file to {doc_id}: {exc}",
             warnings=warnings,
         )
-    rel = Path("documents") / doc_id / stored_name
-    file_ref = FileRef(path=rel.as_posix(), mime=file_mime, sha256=sha)
+
     try:
-        docs.attach_file(doc_id, file_ref)
-    except Exception as exc:  # noqa: BLE001
+        save_document(library, updated, docs)
+    except IndexSyncError as exc:
+        # save_document writes the YAML first. Keep the file and make the
+        # recoverable index fault visible to the caller.
         warnings.append(
-            f"file attached to {doc_id} on disk but not indexed ({exc})"
+            f"{doc_id} upgraded on disk but not indexed ({exc}); "
+            "run a reindex to recover it"
         )
+        return AddOutcome(
+            "upgraded", document=updated, matched_id=doc_id,
+            message=f"attached file to existing {doc_id}", warnings=warnings,
+        )
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        # Metadata was not committed, so remove only the file this upgrade
+        # created and leave the original metadata-only record untouched.
+        try:
+            if moved:
+                shutil.move(str(dest), str(file_path))
+            elif copied:
+                dest.unlink(missing_ok=True)
+        except OSError as cleanup_exc:
+            return AddOutcome(
+                "error",
+                message=(
+                    f"failed to persist upgrade for {doc_id}: {exc}; "
+                    f"cleanup also failed: {cleanup_exc}"
+                ),
+                warnings=warnings,
+            )
+        return AddOutcome(
+            "error", message=f"failed to persist upgrade for {doc_id}: {exc}",
+            warnings=warnings,
+        )
+
     return AddOutcome(
-        "upgraded", matched_id=doc_id,
+        "upgraded", document=updated, matched_id=doc_id,
         message=f"attached file to existing {doc_id}", warnings=warnings,
     )
 
 
+_UNSUPPORTED_DIR_FSYNC_ERRNOS = frozenset(
+    e
+    for e in (
+        errno.EINVAL,
+        getattr(errno, "ENOTSUP", None),
+        getattr(errno, "EOPNOTSUPP", None),
+    )
+    if e is not None
+)
+
+
 def _write_info_yaml(path: Path, document: Document) -> None:
-    """Serialize the validated model to a private ``info.yaml`` file."""
-    path.write_text(_dump_yaml(document))
-    make_private(path, directory=False)
+    """Atomically serialize validated metadata to a private ``info.yaml``."""
+    payload = _dump_yaml(document)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        with tmp_path.open("w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+        make_private(path, directory=False)
+        # os.replace already committed the metadata atomically. Best-effort
+        # fsync the directory entry to make the rename durable; only tolerate
+        # filesystems that do not support directory fsync (EINVAL/ENOTSUP on
+        # some FUSE, NFS/CIFS, and overlay mounts). Any other filesystem error
+        # is surfaced so callers still see genuine durability failures.
+        try:
+            directory_fd = os.open(
+                path.parent, getattr(os, "O_DIRECTORY", 0)
+            )
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except OSError as exc:
+            if exc.errno not in _UNSUPPORTED_DIR_FSYNC_ERRNOS:
+                raise
+    finally:
+        tmp_path.unlink(missing_ok=True)
 
 
 def _dump_yaml(document: Document) -> str:
@@ -644,27 +871,39 @@ def _open_in_editor(document: Document, run_editor) -> Document:
 
 
 def info_yaml_path(library: "Library", doc_id: str) -> Path:
-    return library.documents / doc_id / "info.yaml"
+    """Return a validated metadata path below the document root."""
+    folder = _validate_document_id(library, doc_id)
+    _, document_root = _library_roots(library)
+    path = folder / "info.yaml"
+    _resolve_inside(path, document_root, "metadata path")
+    return path
 
 
 def load_document(library: "Library", doc_id: str) -> Document:
     """Read and validate a document's ``info.yaml`` from disk."""
-    data = yaml.safe_load(info_yaml_path(library, doc_id).read_text())
-    return Document(**data)
+    path = info_yaml_path(library, doc_id)
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    document = Document(**data)
+    _validate_document_for_library(library, document, expected_id=doc_id)
+    return document
 
 
 def save_document(
     library: "Library", document: Document, docs: DocumentService
 ) -> None:
-    """Persist an edited document: rewrite ``info.yaml`` then re-index it.
+    """Persist metadata disk-first, then rebuild its SQLite row set.
 
-    The id (and folder) never change here — only metadata. The DB rows are
-    rebuilt from scratch (``remove`` + ``index``) so author/tag/collection
-    changes are reflected without stale links.
+    IDs, metadata file paths, and symlink targets are validated before the
+    atomic YAML replacement. If index maintenance fails, the exception remains
+    visible while the newly authoritative YAML is left intact for reindexing.
     """
+    _validate_document_for_library(library, document)
     _write_info_yaml(info_yaml_path(library, document.id), document)
-    docs.remove(document.id)
-    docs.index(document)
+    try:
+        docs.remove(document.id)
+        docs.index(document)
+    except Exception as exc:  # noqa: BLE001 - surface the index failure distinctly
+        raise IndexSyncError(document.id, exc) from exc
 
 
 def set_review_status(
@@ -674,6 +913,10 @@ def set_review_status(
     docs: DocumentService,
 ) -> Document:
     """Flip a document's review flag on disk (source of truth) then in the index."""
+    try:
+        status = ReviewStatus(status).value
+    except ValueError as exc:
+        raise ValueError(f"invalid review status: {status!r}") from exc
     document = load_document(library, doc_id)
     document.review_status = status
     _write_info_yaml(info_yaml_path(library, doc_id), document)
@@ -719,14 +962,17 @@ def edit_document(
 def delete_document(
     library: "Library", doc_id: str, docs: DocumentService
 ) -> None:
-    """Remove a document entirely: its on-disk folder, then its index rows.
+    """Remove a document disk-first, then remove its index rows.
 
-    Disk is the source of truth, so the folder (``documents/<id>/`` with its
-    ``info.yaml`` and any file) is removed first; the SQLite rows are dropped
-    after. ``docs.remove`` is a no-op for an unknown id, so a document that was
-    never indexed (disk-only) still deletes cleanly.
+    Invalid ids and symlink escapes are rejected before deletion. Filesystem or
+    SQLite failures are deliberately raised instead of being hidden; when the
+    filesystem step fails, the index is untouched.
     """
-    shutil.rmtree(library.documents / doc_id, ignore_errors=True)
+    folder = _validate_document_id(library, doc_id)
+    if os.path.lexists(folder):
+        # Do not use ignore_errors: a failed delete must not be mistaken for a
+        # successful disk-first mutation.
+        shutil.rmtree(folder)
     docs.remove(doc_id)
 
 

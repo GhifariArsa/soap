@@ -298,7 +298,7 @@ cheat-bar footer.
 | `tab` / `shift+tab` | Cycle panes |
 | `h` / `l` | Focus left / right pane |
 | `enter` / `o` | Open the highlighted document's file with the OS default handler |
-| `/` | Search title, author, tag, DOI (Escape clears) |
+| `/` | Search title, author, tag, DOI (Enter/Down/Tab focus the list keeping the query, Escape clears it) |
 | `r` | Review the inbox (opens the review screen) |
 | `?` | Keyboard reference (help overlay) |
 | `Ctrl-P` | Command palette (search every command by name) |

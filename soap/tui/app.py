@@ -65,13 +65,28 @@ def _cheatbar(inbox: int) -> str:
 
 
 class SearchInput(Input):
-    """The header search box; Escape clears it and returns focus to the list."""
+    """The header search box and its explicit handoff-to-list interactions."""
 
-    BINDINGS = [Binding("escape", "cancel", "Clear", show=False)]
+    BINDINGS = [
+        Binding("enter", "accept", "Accept search", show=False),
+        Binding("down", "handoff", "Focus list", show=False),
+        Binding("tab", "handoff", "Focus list", show=False),
+        Binding("escape", "cancel", "Clear", show=False),
+    ]
+
+    def _focus_list(self) -> None:
+        self.app.query_one(DocumentList).focus()
+
+    def action_accept(self) -> None:
+        """Accept the query without changing the live filter."""
+        self._focus_list()
+
+    def action_handoff(self) -> None:
+        self._focus_list()
 
     def action_cancel(self) -> None:
         self.value = ""  # fires Changed -> app clears the search filter
-        self.app.query_one(DocumentList).focus()
+        self._focus_list()
 
 
 class HelpScreen(ModalScreen[None]):

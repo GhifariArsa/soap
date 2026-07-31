@@ -1,5 +1,7 @@
 """Unit tests for the pure ingest functions: no filesystem, no network."""
 
+import socket
+
 import httpx
 import pytest
 
@@ -21,7 +23,8 @@ from soap.ingest.merge import (
     merge_metadata,
     unique_citekey,
 )
-from soap.ingest.network import MAX_REDIRECTS
+from soap.ingest import network as network_mod
+from soap.ingest.network import MAX_REDIRECTS, UnsafeURL, validate_url
 from soap.ingest.url import (
     arxiv_id_from_url,
     bare_arxiv_id,
@@ -390,6 +393,22 @@ def test_download_pdf_requires_magic_even_when_content_type_is_pdf():
     )
     res = download_pdf("https://h/x.pdf", client=client)
     assert res.path is None and "not a PDF" in res.error
+
+
+def test_validate_url_blocks_hostname_resolving_to_private(monkeypatch):
+    def resolve_private(host, port, *args, **kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port or 0))]
+
+    monkeypatch.setattr(network_mod.socket, "getaddrinfo", resolve_private)
+    with pytest.raises(UnsafeURL, match="private or reserved"):
+        validate_url("http://public-name.example/paper.pdf")
+
+
+def test_validate_url_allows_hostname_resolving_to_public():
+    assert (
+        validate_url("https://api.crossref.org/works")
+        == "https://api.crossref.org/works"
+    )
 
 
 def test_download_pdf_rejects_private_initial_destinations():

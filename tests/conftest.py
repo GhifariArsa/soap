@@ -1,11 +1,34 @@
 """Shared fixtures: a fresh library and a helper for building test files."""
 
+import socket
 from pathlib import Path
 
 import httpx
 import pytest
 
 from soap.library import Library
+
+# A genuinely global address every stubbed hostname resolves to, so the SSRF
+# validation runs its real ``_blocked_ip`` logic and treats the host as public.
+_PUBLIC_STUB_IP = "93.184.216.34"
+
+
+@pytest.fixture(autouse=True)
+def _deterministic_dns(monkeypatch):
+    """Keep mocked network tests hermetic: never touch live DNS.
+
+    Production still resolves hostnames and blocks non-global destinations; the
+    tests just must not depend on a resolver. Any hostname that reaches
+    resolution maps to a fixed public address, so the resolution branch of
+    ``validate_url`` runs without a network lookup. IP literals and blocked
+    hostnames (loopback/private/link-local/reserved, ``localhost``, ``.local``)
+    are rejected *before* resolution, so those assertions are unaffected.
+    """
+
+    def fake_getaddrinfo(host, port, *args, **kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (_PUBLIC_STUB_IP, port or 0))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
 
 
 @pytest.fixture

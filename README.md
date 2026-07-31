@@ -299,6 +299,7 @@ cheat-bar footer.
 | `h` / `l` | Focus left / right pane |
 | `enter` / `o` | Open the highlighted document's file with the OS default handler |
 | `/` | Search title, author, tag, DOI (Enter/Down/Tab focus the list keeping the query, Escape clears it) |
+| `m` | Cycle the highlighted document's read status (unread → reading → read) |
 | `r` | Review the inbox (opens the review screen) |
 | `?` | Keyboard reference (help overlay) |
 | `Ctrl-P` | Command palette (search every command by name) |

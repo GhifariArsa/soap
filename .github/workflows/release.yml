@@ -47,7 +47,7 @@ jobs:
 
       - uses: astral-sh/setup-uv@0c5e2b8115b80b4c7c5ddf6ffdd634974642d182 # v5.4.1
         with:
-          version: "0.7.2"
+          version: "0.10.0"
           python-version: "3.14.2"
 
       - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # pinned action commit
@@ -113,7 +113,7 @@ jobs:
 
       - uses: astral-sh/setup-uv@0c5e2b8115b80b4c7c5ddf6ffdd634974642d182 # v5.4.1
         with:
-          version: "0.7.2"
+          version: "0.10.0"
           python-version: "3.14.2"
 
       - name: Build wheel + sdist

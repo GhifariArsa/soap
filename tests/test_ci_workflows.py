@@ -65,7 +65,7 @@ def test_workflow_actions_and_release_build_inputs_are_pinned() -> None:
     assert refs
     assert all(SHA.fullmatch(match["ref"]) for match in refs)
     text = texts[1]
-    assert 'version: "0.7.2"' in text
+    assert 'version: "0.10.0"' in text
     assert 'python-version: "3.14.2"' in text
     assert 'go-version: "1.24.5"' in texts[0]
     assert 'toolchain: "1.87.0"' in text

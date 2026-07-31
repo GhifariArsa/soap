@@ -36,8 +36,6 @@ jobs:
       matrix:
         include:
           - { os: macos-14, target: macos-arm64 }
-          # macOS 15 is the supported hosted Intel runner; keep this target separate from arm64.
-          - { os: macos-15, target: macos-x86_64 }
           - { os: ubuntu-24.04, target: linux-x86_64 }
           - { os: ubuntu-24.04-arm, target: linux-arm64 }
     needs: validate
@@ -125,7 +123,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc # v1.12.4
         # No `with:` — Trusted Publishing supplies credentials via OIDC.
 
-  # ── Public GitHub Release with the four binaries + a combined checksum
+  # ── Public GitHub Release with the three binaries + a combined checksum
   # manifest. Gated on a real tag push (action-gh-release needs the tag).
   github-release:
     name: GitHub Release

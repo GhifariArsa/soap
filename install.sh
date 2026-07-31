@@ -26,7 +26,6 @@ case "$os" in
 Darwin)
 	case "$arch" in
 	arm64) target="macos-arm64" ;;
-	x86_64) target="macos-x86_64" ;;
 	esac
 	;;
 Linux)

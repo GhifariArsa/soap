@@ -27,7 +27,7 @@ from textual.widgets import DataTable, Input, ListView, Static
 
 from soap.config import load_config, save_theme
 from soap.db.documents import DocumentService
-from soap.library import Library
+from soap.library import Library, edit_document
 from soap.tui._markup import key, sep
 from soap.tui.review import ReviewScreen
 from soap.tui.tags import TagEditScreen
@@ -162,6 +162,7 @@ class SoapApp(App):
         Binding("slash", "search", "search", show=False, key_display="/"),
         Binding("r", "review", "review inbox", show=False),
         Binding("t", "edit_tags", "edit tags", show=False),
+        Binding("e", "edit_metadata", "edit metadata", show=False),
         Binding("question_mark", "help", "help", show=False, key_display="?"),
         Binding("tab", "focus_pane(1)", "Next pane", show=False),
         Binding("shift+tab", "focus_pane(-1)", "Prev pane", show=False),
@@ -172,9 +173,12 @@ class SoapApp(App):
         Binding("q", "quit", "quit", show=False),
     ]
 
-    def __init__(self, library: Library) -> None:
+    def __init__(self, library: Library, editor_runner=None) -> None:
         super().__init__()
         self.library = library
+        # Injectable for tests; the default is the shared VISUAL/EDITOR/vi
+        # runner used by the library and inbox review surfaces.
+        self.editor_runner = editor_runner
         self.config = load_config(library.path)
         self.docs: DocumentService | None = None
         self.filter_kind = "all"
@@ -374,6 +378,39 @@ class SoapApp(App):
                 parts.append(f"{skipped} skipped")
             self.notify(", ".join(parts))
         self.refresh_data()
+
+    def action_edit_metadata(self) -> None:
+        """Edit the selected filed document's on-disk metadata in an editor."""
+        doc_id = self.query_one(DocumentList).current_id
+        if self.docs is None or doc_id is None:
+            return
+        if self.docs.get_document(doc_id) is None:
+            return
+        try:
+            # Textual must release the terminal before a full-screen editor can
+            # take it over. Validation happens before edit_document writes or
+            # re-indexes, so an invalid saved file remains available to the user.
+            with self.suspend():
+                edit_document(
+                    self.library, doc_id, self.docs,
+                    editor_runner=self.editor_runner,
+                )
+        except Exception as exc:  # noqa: BLE001 - editor/YAML errors are user input
+            self.notify(
+                f"metadata edit not applied ({exc})",
+                severity="error",
+                timeout=8,
+            )
+            return
+        self.refresh_data()
+        # refresh_data rebuilds the table; restore the edited row and detail pane
+        # rather than leaving the cursor on the first document.
+        doclist = self.query_one(DocumentList)
+        ids = getattr(doclist, "_ids", [])
+        if doc_id in ids:
+            doclist.move_cursor(row=ids.index(doc_id))
+        self._show_detail(doc_id)
+        self.notify("metadata saved")
 
     def action_edit_tags(self) -> None:
         doc_id = self.query_one(DocumentList).current_id

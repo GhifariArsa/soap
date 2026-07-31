@@ -7,29 +7,14 @@ through :func:`soap.tui._markup.sep` so styled labels never mash into their
 values.
 """
 
-from typing import ClassVar
-
 from rich.markup import escape
-from textual.binding import Binding
 from textual.containers import VerticalScroll
-from textual.events import Blur, Focus
 from textual.widgets import Static
 
 from soap.models.document import Document, ReviewStatus
 from soap.tui._markup import confidence_meter, sep
 
 _LABEL_WIDTH = 6
-_ABSTRACT_PREVIEW_CHARS = 480
-
-
-def _abstract_preview(abstract: str) -> str:
-    """Return a small, deterministic preview suitable for the unfocused pane."""
-    if len(abstract) <= _ABSTRACT_PREVIEW_CHARS:
-        return abstract
-    # Prefer ending on a word boundary, while keeping the preview bounded even
-    # when metadata contains one very long line.
-    preview = abstract[:_ABSTRACT_PREVIEW_CHARS].rsplit(" ", 1)[0].rstrip()
-    return preview + "…"
 
 
 def _kv(label: str, value: str, value_color: str = "$foreground") -> str:
@@ -47,51 +32,19 @@ def _author_summary(authors: list[str]) -> str:
 
 
 class DetailPane(VerticalScroll):
-    """The right pane, compact until focused and scrollable when focused."""
-
-    BINDINGS: ClassVar[list[Binding]] = [
-        Binding("j", "detail_scroll_down", "Scroll down", show=False),
-        Binding("k", "detail_scroll_up", "Scroll up", show=False),
-    ]
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._document: Document | None = None
+    """The right pane: full metadata for the selected document."""
 
     def compose(self):
         yield Static("", id="detail-body")
 
     def show(self, document: Document | None) -> None:
-        self._document = document
         body = self.query_one("#detail-body", Static)
         if document is None:
             body.update("[$text-muted]Nothing selected[/]")
-        else:
-            body.update(self._to_markup(document, focused=self.has_focus))
-        # A new selection (and every focus-mode transition) starts at the top.
-        self.scroll_home(animate=False)
-
-    def on_focus(self, _event: Focus) -> None:
-        self._rerender(focused=True)
-
-    def on_blur(self, _event: Blur) -> None:
-        self._rerender(focused=False)
-
-    def _rerender(self, *, focused: bool) -> None:
-        if self._document is None:
             return
-        self.query_one("#detail-body", Static).update(
-            self._to_markup(self._document, focused=focused)
-        )
-        self.scroll_home(animate=False)
+        body.update(self._to_markup(document))
 
-    def action_detail_scroll_down(self) -> None:
-        self.scroll_down(animate=False)
-
-    def action_detail_scroll_up(self) -> None:
-        self.scroll_up(animate=False)
-
-    def _to_markup(self, doc: Document, *, focused: bool = False) -> str:
+    def _to_markup(self, doc: Document) -> str:
         lines: list[str] = [f"[b $primary]{escape(doc.title or '—')}[/]"]
 
         if doc.authors:
@@ -141,8 +94,7 @@ class DetailPane(VerticalScroll):
         if doc.abstract:
             lines.append("")
             lines.append("[b $text-muted]ABSTRACT[/]")
-            abstract = doc.abstract if focused else _abstract_preview(doc.abstract)
-            lines.append(f"[$text-muted]{escape(abstract)}[/]")
+            lines.append(f"[$text-muted]{escape(doc.abstract)}[/]")
 
         lines.append("")
         if doc.files:

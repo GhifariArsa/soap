@@ -120,7 +120,7 @@ jobs:
         run: uv build # one py3-none-any wheel covers every platform
 
       - name: Publish
-        uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebf128415bbaabdfc # v1.12.4
+        uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc # v1.12.4
         # No `with:` — Trusted Publishing supplies credentials via OIDC.
 
   # ── Public GitHub Release with the four binaries + a combined checksum

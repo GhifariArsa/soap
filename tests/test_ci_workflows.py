@@ -8,7 +8,7 @@ import yaml
 
 ROOT = Path(__file__).parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
-ACTION_REF = re.compile(r"^\s*- uses: (?P<action>[\w./-]+)@(?P<ref>\S+)", re.MULTILINE)
+ACTION_REF = re.compile(r"^\s*(?:- )?uses: (?P<action>[\w./-]+)@(?P<ref>\S+)", re.MULTILINE)
 SHA = re.compile(r"^[0-9a-f]{40}$")
 
 

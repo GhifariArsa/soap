@@ -23,7 +23,7 @@ success:    "#859900"       # green — filed / read / high confidence
 warning:    "#b58900"
 error:      "#dc322f"       # red — low confidence / errors
 foreground: "#586e75"       # primary text
-background: "#fdf6e3"        # app background
+background: "#fdf6e3"        # base for derived colors (the app root is transparent — your terminal shows through)
 surface:    "#eee8d5"        # top bar / footer
 panel:      "#eee8d5"        # panes / cards
 

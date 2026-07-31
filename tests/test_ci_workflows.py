@@ -43,14 +43,24 @@ def test_release_waits_for_reusable_validation() -> None:
         "publish-pypi",
     }
 
-    # Keep the four native targets and the manual build-only dry run intact.
-    targets = {item["target"] for item in jobs["build-binaries"]["strategy"]["matrix"]["include"]}
+    # Keep the three native targets and the manual build-only dry run intact.
+    matrix = jobs["build-binaries"]["strategy"]["matrix"]["include"]
+    targets = {item["target"] for item in matrix}
     assert targets == {
         "macos-arm64",
-        "macos-x86_64",
         "linux-x86_64",
         "linux-arm64",
     }
+    runners = {item["target"]: item["os"] for item in matrix}
+    assert runners["macos-arm64"] == "macos-14"
+    assert runners["linux-x86_64"] == "ubuntu-24.04"
+    assert runners["linux-arm64"] == "ubuntu-24.04-arm"
+    pyapp_step = next(
+        step
+        for step in jobs["build-binaries"]["steps"]
+        if step.get("name") == "Build standalone binary (PyApp)"
+    )
+    assert pyapp_step["env"]["MACOSX_DEPLOYMENT_TARGET"] == "13.0"
     assert jobs["publish-pypi"]["if"] == "startsWith(github.ref, 'refs/tags/v')"
     assert jobs["github-release"]["if"] == "startsWith(github.ref, 'refs/tags/v')"
 

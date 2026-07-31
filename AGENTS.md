@@ -101,8 +101,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 - **Release CI:** `.github/workflows/release.yml` fires on a `v*` tag push (or
   `workflow_dispatch` for a build-only dry run). It first reuses the required checks
-  from `.github/workflows/ci.yml`, then builds PyApp standalone binaries across 4
-  native runners (macOS arm64/x86_64 + Linux x86_64/arm64 — no Windows, no signing),
+  from `.github/workflows/ci.yml`, then builds PyApp standalone binaries across 3
+  native runners (macOS arm64 + Linux x86_64/arm64 — no Windows, no signing),
   publishes to PyPI via **Trusted Publishing** (`pypi` environment, OIDC, no tokens),
   and cuts a GitHub Release. Actions and toolchain/build inputs are pinned in the
   workflows; the publish/release jobs are tag-gated (skipped on dispatch).

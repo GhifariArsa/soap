@@ -142,15 +142,13 @@ def current_target() -> str | None:
     """Map this host to a release asset target, or ``None`` if unsupported.
 
     Targets mirror the release matrix and the installer: ``macos-arm64``,
-    ``macos-x86_64``, ``linux-arm64``, ``linux-x86_64``.
+    ``linux-arm64``, ``linux-x86_64``.
     """
     system = platform.system()
     machine = platform.machine().lower()
     if system == "Darwin":
         if machine in ("arm64", "aarch64"):
             return "macos-arm64"
-        if machine in ("x86_64", "amd64"):
-            return "macos-x86_64"
     elif system == "Linux":
         if machine in ("aarch64", "arm64"):
             return "linux-arm64"

@@ -36,8 +36,6 @@ jobs:
       matrix:
         include:
           - { os: macos-14, target: macos-arm64 }
-          # macOS 13 is the hosted Intel runner; keep this target separate from arm64.
-          - { os: macos-13, target: macos-x86_64 }
           - { os: ubuntu-24.04, target: linux-x86_64 }
           - { os: ubuntu-24.04-arm, target: linux-arm64 }
     needs: validate
@@ -66,6 +64,8 @@ jobs:
           PYAPP_DISTRIBUTION_EMBED: "1" # bake the runtime in -> offline, self-contained
           PYAPP_EXEC_SPEC: "soap.main:app"
           PYAPP_SELF_COMMAND: "none" # disable PyApp's `self`; soap ships its own updater
+          # Compile native code for macOS 13 compatibility on current runners.
+          MACOSX_DEPLOYMENT_TARGET: "13.0"
         run: |
           set -euo pipefail
           wheel=$(ls "$GITHUB_WORKSPACE"/dist/*.whl)
@@ -123,7 +123,7 @@ jobs:
         uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc # v1.12.4
         # No `with:` — Trusted Publishing supplies credentials via OIDC.
 
-  # ── Public GitHub Release with the four binaries + a combined checksum
+  # ── Public GitHub Release with the three binaries + a combined checksum
   # manifest. Gated on a real tag push (action-gh-release needs the tag).
   github-release:
     name: GitHub Release

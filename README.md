@@ -26,7 +26,7 @@ For a published release, install the `soap-tui` package with uv:
 uv tool install soap-tui
 ```
 
-Standalone binaries are also published for macOS (arm64 and x86_64) and Linux
+Standalone binaries are also published for macOS (arm64) and Linux
 (arm64 and x86_64) with each GitHub Release. The installer verifies the download
 before placing `soap` in `~/.local/bin`:
 

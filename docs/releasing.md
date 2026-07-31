@@ -27,7 +27,7 @@ the first release and after any repository migration:
    rules are GitHub settings and are not represented by YAML.
 
 The workflow itself additionally enforces the `v*` tag condition, requires the
-reusable CI validation workflow and four binary builds to pass before publishing,
+reusable CI validation workflow and three binary builds to pass before publishing,
 and grants the publish job only `id-token: write`. Both layers are required.
 
 `.github/workflows/ci.yml` provides the required checks: `tests`, `lint / format`,
@@ -47,9 +47,9 @@ That's it. The tag drives:
 
 | Job (`release.yml`) | Produces |
 |---|---|
-| `build-binaries` | `soap-<target>` binaries for macOS arm64/x86_64 + Linux x86_64/arm64, each with a `.sha256` |
+| `build-binaries` | `soap-<target>` binaries for macOS arm64 + Linux x86_64/arm64, each with a `.sha256` |
 | `publish-pypi` | wheel + sdist uploaded to PyPI (`soap-tui`) via Trusted Publishing |
-| `github-release` | a public Release attaching the four binaries + a combined `checksums.txt` |
+| `github-release` | a public Release attaching the three binaries + a combined `checksums.txt` |
 
 Targets are **macOS + Linux only** (no Windows for v1) and binaries are shipped
 **unsigned** (macOS notarization deferred — `curl|sh`/direct downloads hit
@@ -60,7 +60,7 @@ which mostly bypasses the prompt).
 
 Trigger the workflow manually (Actions → **release** → *Run workflow*, or
 `gh workflow run release.yml`). A `workflow_dispatch` run first runs the same
-required validation checks, then builds and smoke-tests the binaries on all four
+required validation checks, then builds and smoke-tests the binaries on all three
 targets, but **skips** `publish-pypi` and `github-release` (both are gated on an
 actual `v*` tag). Use it to validate the matrix before committing to a real tag.
 
@@ -110,4 +110,6 @@ Trusted Publisher; nothing changes for subsequent tags.
   (offline/self-contained), the reviewed Python minor `3.14` (the supported
   PyApp selector), `PYAPP_EXEC_SPEC=soap.main:app`,
   `PYAPP_SELF_COMMAND=none`, and the pinned `cargo install pyapp --version
-  0.29.0 --locked`.
+  0.29.0 --locked`. The macOS build also sets `MACOSX_DEPLOYMENT_TARGET=13.0`
+  so native code compiled on the current runner stays back-compatible to
+  macOS 13.

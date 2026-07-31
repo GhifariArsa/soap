@@ -110,4 +110,6 @@ Trusted Publisher; nothing changes for subsequent tags.
   (offline/self-contained), the reviewed Python minor `3.14` (the supported
   PyApp selector), `PYAPP_EXEC_SPEC=soap.main:app`,
   `PYAPP_SELF_COMMAND=none`, and the pinned `cargo install pyapp --version
-  0.29.0 --locked`.
+  0.29.0 --locked`. The macOS build also sets `MACOSX_DEPLOYMENT_TARGET=13.0`
+  so native code compiled on the current runner stays back-compatible to
+  macOS 13.

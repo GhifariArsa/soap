@@ -137,6 +137,8 @@ soap add ~/papers/paper.pdf --no-fetch \
   --author "Vaswani, Ashish" --year 2017
 ```
 
+![adding files to soap](docs/add.gif)
+
 `SOURCE` can be a local file, directory, URL, DOI, or bare arXiv ID; ISBN
 metadata comes from `--isbn`, and identifiers can be passed explicitly with
 `--doi` or `--arxiv`. The most commonly used options:

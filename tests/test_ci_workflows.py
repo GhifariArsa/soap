@@ -108,9 +108,7 @@ def test_homebrew_bump_is_tag_gated_and_token_scoped() -> None:
     text = (WORKFLOWS / "release.yml").read_text()
     assert "secrets.HOMEBREW_TAP_TOKEN" in text
     assert bump["permissions"] == {"contents": "read"}
-    checkout = next(
-        step for step in bump["steps"] if step.get("with", {}).get("path") == "tap"
-    )
+    checkout = next(step for step in bump["steps"] if step.get("with", {}).get("path") == "tap")
     assert checkout["with"]["repository"] == "GhifariArsa/homebrew-soap"
     assert checkout["with"]["token"] == "${{ secrets.HOMEBREW_TAP_TOKEN }}"
 

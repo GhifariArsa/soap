@@ -17,6 +17,8 @@ open it — all without leaving the terminal.
 [![pypi](https://img.shields.io/pypi/v/soap-tui?label=pypi&color=3775a9)](https://pypi.org/project/soap-tui/)
 [![homebrew](https://img.shields.io/badge/homebrew-GhifariArsa%2Fsoap-fbb040)](https://github.com/GhifariArsa/homebrew-soap)
 
+![soap demo](docs/demo.gif)
+
 </div>
 
 ---

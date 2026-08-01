@@ -151,16 +151,18 @@ the last manually-pinned version until the secret is added.
 
 ## Regenerating the demo GIFs
 
-The README's two demo GIFs — `docs/demo.gif` (the TUI overview) and
-`docs/add.gif` (the `soap add` flow) — are **generated**, not hand-recorded.
+The README's two demo GIFs — `docs/demo.gif` (the TUI browse/organize tour) and
+`docs/add.gif` (the ingest + review story) — are **generated**, not hand-recorded.
 The source of truth is a pair of [VHS](https://github.com/charmbracelet/vhs)
 tapes plus a Python driver:
 
 - `scripts/demo.tape` / `scripts/demo-add.tape` — the recorded keystrokes,
-  using soap's real keybindings and an offline (`--no-fetch`) `soap add`.
-- `scripts/demo.py` — seeds a throwaway library (invented papers + a placeholder
-  `sample.pdf`) under a temp `HOME`/`SOAP_DIR`, renders both tapes, and cleans
-  up. Nothing from your real library, home directory, or the network is touched.
+  using soap's real keybindings (browse: sidebar tour, search, tag add/remove;
+  add: three `soap add`s then working the review queue from the CLI and TUI).
+- `scripts/demo.py` — renders each GIF from its own throwaway `HOME`/`SOAP_DIR`:
+  the browse GIF over a library seeded with invented papers, the add GIF over a
+  fresh library plus placeholder PDFs under a throwaway `~/Downloads`. It cleans
+  up both temp dirs. Nothing from your real library or home directory appears.
 
 **Prerequisites:** `vhs`, and its `ttyd` + `ffmpeg` dependencies, on `PATH`.
 On macOS: `brew install vhs` (pulls in ttyd + ffmpeg).
@@ -171,8 +173,16 @@ On macOS: `brew install vhs` (pulls in ttyd + ffmpeg).
 uv run python scripts/demo.py
 ```
 
-Re-runs are deterministic (fixed ids/titles/`added_at` for the seed set) and
-write straight over `docs/demo.gif` and `docs/add.gif`. To tweak the walkthrough,
-edit the `.tape` files (they are commented); to change the seeded library, edit
-the `DOCS` list in `scripts/demo.py` (the same fake-library idea as
-`scripts/shoot_tui.py`, which shoots the static reference screenshots).
+> **Network:** the browse GIF is fully offline, but the add GIF is **not** — its
+> first two adds hit the live network to show real fetched metadata (an ISBN
+> lookup via Open Library, and an arXiv link → arXiv metadata + best-effort PDF).
+> The third add is offline (`--no-fetch`). If those services are unreachable the
+> add GIF can't be regenerated; re-run when they're up. The placeholder book PDFs
+> under `~/Downloads` are stub `%PDF` files the driver writes into the throwaway
+> HOME — never real copyrighted book files.
+
+Re-runs are deterministic apart from those live lookups (fixed ids/titles for the
+seeded set) and write straight over `docs/demo.gif` and `docs/add.gif`. To tweak
+a walkthrough, edit the `.tape` files (they are commented); to change the seeded
+browse library, edit the `DOCS` list in `scripts/demo.py` (the same fake-library
+idea as `scripts/shoot_tui.py`, which shoots the static reference screenshots).

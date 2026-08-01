@@ -1,22 +1,28 @@
-"""Regenerate the README demo GIFs from a seeded, throwaway soap library.
+"""Regenerate the README demo GIFs from throwaway soap libraries.
 
 Run:
 
     uv run python scripts/demo.py
 
-This is the canonical regenerator for ``docs/demo.gif`` (the TUI overview) and
-``docs/add.gif`` (the ``soap add`` flow). It:
+This is the canonical regenerator for ``docs/demo.gif`` (the TUI browse/organize
+tour) and ``docs/add.gif`` (the ingest + review story). It renders each GIF from
+its own throwaway ``HOME`` / ``SOAP_DIR`` so nothing from your real library or
+home directory ever appears:
 
-  1. builds a throwaway library under a temp ``HOME`` / ``SOAP_DIR`` and seeds it
-     with *invented* documents (the same fake-library idea as
-     ``scripts/shoot_tui.py``) plus a placeholder ``sample.pdf`` for the add flow,
-  2. drives the real ``soap`` binary with VHS (charmbracelet/vhs) to record the
-     two GIFs from ``scripts/demo.tape`` and ``scripts/demo-add.tape``,
-  3. removes the temp dir afterward.
+  * ``docs/demo.gif`` — a library seeded with *invented* documents (the same
+    fake-library idea as ``scripts/shoot_tui.py``); fully offline.
+  * ``docs/add.gif`` — a fresh empty library plus placeholder PDFs under a
+    throwaway ``~/Downloads``; the tape adds three documents and works the review
+    queue.
 
-Nothing from your real library, home directory, or the network is touched — the
-add flow runs ``--no-fetch`` and the update nudge is pre-cached offline. Re-runs
-are deterministic (fixed ids, titles, and ``added_at``).
+NETWORK: the add tape is deliberately NOT fully offline. Its first two adds hit
+the live network to show real fetched metadata — an ISBN lookup (Open Library)
+and an arXiv link (arXiv metadata + best-effort PDF). The third add and the
+whole browse tape stay offline. If a live service is down at render time the add
+GIF can't be regenerated; re-run when they're reachable.
+
+Both runs are deterministic apart from those live lookups (fixed ids/titles for
+the seeded set) and the update nudge is pre-cached so no *extra* network happens.
 
 Prerequisites: ``vhs``, ``ttyd``, and ``ffmpeg`` on ``PATH`` (e.g.
 ``brew install vhs``, which pulls in ttyd + ffmpeg). See docs/releasing.md.
@@ -37,7 +43,16 @@ from soap.library import Library, save_document
 from soap.models.document import Document, FileRef
 
 REPO = Path(__file__).resolve().parents[1]
-TAPES = [REPO / "scripts" / "demo.tape", REPO / "scripts" / "demo-add.tape"]
+BROWSE_TAPE = REPO / "scripts" / "demo.tape"
+ADD_TAPE = REPO / "scripts" / "demo-add.tape"
+
+# Placeholder book PDFs the add tape references as `~/Downloads/<name>`. The names
+# match the on-screen commands; HOME is a throwaway dir so the paths look genuine.
+# These are stub PDFs — never real copyrighted book files.
+DOWNLOADS = [
+    "TinyML with TensorFlow Lite.pdf",
+    "Functional Programming in Scala.pdf",
+]
 
 # A minimal but valid PDF so attachments are faithful (starts with the %PDF magic
 # marker soap's ingest checks for). Content is irrelevant — nothing is parsed.
@@ -49,6 +64,18 @@ MINIMAL_PDF = (
     b"trailer<</Root 1 0 R>>\n"
     b"%%EOF\n"
 )
+
+
+def _pdf(tag: str) -> bytes:
+    """A minimal PDF whose bytes are unique per ``tag``.
+
+    soap dedups adds by file sha256, so the placeholder PDFs must differ —
+    otherwise the second add of an identical stub is rejected as a duplicate.
+    A trailing comment after ``%%EOF`` is ignored by readers and by soap (which
+    never parses the file).
+    """
+    return MINIMAL_PDF + f"% {tag}\n".encode()
+
 
 # Invented library contents — famous public papers/books, NONE from a real user
 # library. Fields mirror scripts/shoot_tui.py's seeding scheme.
@@ -179,7 +206,7 @@ def seed(library: Library) -> None:
             folder = library.documents / did
             folder.mkdir(parents=True, exist_ok=True)
             fname = f"{did}.pdf"
-            (folder / fname).write_bytes(MINIMAL_PDF)
+            (folder / fname).write_bytes(_pdf(did))
             doc = Document(
                 id=did,
                 type=typ,
@@ -211,55 +238,82 @@ def require_tools() -> None:
         )
 
 
+def _init_library(soap_dir: Path) -> Library:
+    """Create + initialize a library and write the shipped starter config.
+
+    The starter config ships ``always_review: true``, so every add lands in the
+    review queue — the first-run behavior both tapes rely on.
+    """
+    library = Library(soap_dir)
+    library.create_directories()
+    library.initialize_database()
+    _write_starter_config(soap_dir)
+    # Pre-cache the update nudge so subcommands make no *extra* network call.
+    _write_cache_ts(soap_dir / NUDGE_CACHE_FILENAME, time.time())
+    return library
+
+
+def _build_env(home: Path, soap_dir: Path) -> dict[str, str]:
+    """A VHS environment pinned to a throwaway library with `soap` on PATH.
+
+    This driver runs under ``uv run``, so ``sys.executable`` is the project venv
+    and its bin dir holds the ``soap`` console script.
+    """
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env["SOAP_DIR"] = str(soap_dir)
+    venv_bin = Path(sys.executable).parent
+    env["PATH"] = f"{venv_bin}{os.pathsep}{env['PATH']}"
+    # Keep the terminal clean/deterministic inside the recording.
+    env["TERM"] = "xterm-256color"
+    env["PS1"] = "$ "
+    return env
+
+
+def _warm(env: dict[str, str], cwd: Path) -> None:
+    """Prime the import path so the first launch inside the tape is snappy."""
+    subprocess.run(
+        ["soap", "--version"],
+        env=env,
+        cwd=cwd,
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def _render(tape: Path, env: dict[str, str]) -> None:
+    print(f"→ rendering {tape.relative_to(REPO)} …", flush=True)
+    subprocess.run(["vhs", str(tape)], env=env, cwd=REPO, check=True)
+
+
 def main() -> None:
     require_tools()
-    tmp = Path(tempfile.mkdtemp(prefix="soap-demo-"))
+    browse_tmp = Path(tempfile.mkdtemp(prefix="soap-demo-browse-"))
+    add_tmp = Path(tempfile.mkdtemp(prefix="soap-demo-add-"))
     try:
-        home = tmp
-        soap_dir = home / ".soap"
-        library = Library(soap_dir)
-        library.create_directories()
-        library.initialize_database()
-        # Match a real `soap init` (ships always_review: true) so the add flow
-        # exercises the review queue the same way a first-run user would.
-        _write_starter_config(soap_dir)
-        seed(library)
+        # --- browse/overview GIF: seeded, fully-offline library ------------
+        browse_soap = browse_tmp / ".soap"
+        seed(_init_library(browse_soap))
+        browse_env = _build_env(browse_tmp, browse_soap)
+        _warm(browse_env, browse_tmp)
+        _render(BROWSE_TAPE, browse_env)
 
-        # The add flow adds this file; it lives in HOME so the tape can `cd ~`
-        # and type a clean, relative `soap add sample.pdf`.
-        (home / "sample.pdf").write_bytes(MINIMAL_PDF)
+        # --- add/ingest GIF: fresh empty library + ~/Downloads placeholders -
+        add_soap = add_tmp / ".soap"
+        _init_library(add_soap)  # empty inbox — the tape's three adds fill it
+        downloads = add_tmp / "Downloads"
+        downloads.mkdir(parents=True, exist_ok=True)
+        for name in DOWNLOADS:
+            (downloads / name).write_bytes(_pdf(name))
+        add_env = _build_env(add_tmp, add_soap)
+        _warm(add_env, add_tmp)
+        _render(ADD_TAPE, add_env)
 
-        # Pre-cache the update nudge so `soap add` makes no network call.
-        _write_cache_ts(soap_dir / NUDGE_CACHE_FILENAME, time.time())
-
-        # Environment for VHS: the seeded library, and the venv's `soap` on PATH.
-        # (This driver runs under `uv run`, so sys.executable is the project venv
-        # and its bin dir holds the `soap` console script.)
-        env = os.environ.copy()
-        env["HOME"] = str(home)
-        env["SOAP_DIR"] = str(soap_dir)
-        venv_bin = Path(sys.executable).parent
-        env["PATH"] = f"{venv_bin}{os.pathsep}{env['PATH']}"
-        # Keep the terminal clean/deterministic inside the recording.
-        env["TERM"] = "xterm-256color"
-        env["PS1"] = "$ "
-
-        # Warm the import path so the first TUI launch inside the tape is snappy.
-        subprocess.run(
-            ["soap", "--version"],
-            env=env,
-            cwd=home,
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-
-        for tape in TAPES:
-            print(f"→ rendering {tape.relative_to(REPO)} …", flush=True)
-            subprocess.run(["vhs", str(tape)], env=env, cwd=REPO, check=True)
         print("done. Wrote docs/demo.gif and docs/add.gif.")
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        shutil.rmtree(browse_tmp, ignore_errors=True)
+        shutil.rmtree(add_tmp, ignore_errors=True)
 
 
 if __name__ == "__main__":

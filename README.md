@@ -6,9 +6,9 @@
 
 Point soap at a local file, DOI, arXiv ID, ISBN, directory, or URL. It resolves
 the metadata (and, for links, best-effort downloads the PDF), queues anything it
-isn't sure about for a quick review, and keeps everything in a plain, readable,
-version-controllable library on disk. Then browse, search, tag, and open it —
-all without leaving the terminal.
+is unsure about for a quick review, and keeps everything in a plain, readable,
+version-controllable library on disk. From there you can browse, search, tag, and
+open it — all without leaving the terminal.
 
 [![ci](https://github.com/GhifariArsa/soap/actions/workflows/ci.yml/badge.svg)](https://github.com/GhifariArsa/soap/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/GhifariArsa/soap?label=release&color=4b8bbe)](https://github.com/GhifariArsa/soap/releases)
@@ -21,29 +21,30 @@ all without leaving the terminal.
 
 ---
 
-## what it is
+## Overview
 
-Keeping a reference library usually means juggling a heavyweight desktop app or
-a folder of PDFs with names like `paper (3) final_v2.pdf`. soap is neither. It's
-a fast, keyboard-first TUI backed by a library where **every record is a plain
-`info.yaml` file on disk** — so you can read it, diff it, and check it into git.
+Keeping a reference library usually means running a heavyweight desktop
+application or maintaining a folder of PDFs with names like
+`paper (3) final_v2.pdf`. soap is neither. It is a fast, keyboard-first TUI
+backed by a library in which **every record is a plain `info.yaml` file on
+disk** — so you can read it, diff it, and check it into git.
 
 soap:
 
-- **takes anything as a source** — a local file, a whole directory, a DOI, a
-  bare arXiv ID, an ISBN, or a URL,
-- **fetches the metadata for you** from Crossref, arXiv, or Open Library, and
-  best-effort **downloads the PDF** for arXiv and direct-PDF links (open-access
-  DOIs too),
-- **queues the uncertain records** so you accept, correct, or skip them in a
-  quick review pass instead of trusting a bad guess,
+- **accepts any source** — a local file, a whole directory, a DOI, a bare arXiv
+  ID, an ISBN, or a URL;
+- **fetches metadata automatically** from Crossref, arXiv, or Open Library, and
+  best-effort **downloads the PDF** for arXiv and direct-PDF links (and
+  open-access DOIs);
+- **queues uncertain records** so you can accept, correct, or skip them in a
+  quick review pass rather than trust a bad guess;
 - and lets you **browse, search, tag, and open** the whole library from a TUI —
   or drive the same library from the CLI.
 
-The on-disk record is the source of truth; the SQLite index is just a fast,
+The on-disk record is the source of truth; the SQLite index is only a fast,
 rebuildable view. soap never parses the contents of your PDFs.
 
-## install
+## Installation
 
 **Homebrew** (recommended — no Python required):
 
@@ -52,7 +53,7 @@ brew install GhifariArsa/soap/soap-tui
 ```
 
 This installs a self-contained binary (embedded CPython 3.14 via PyApp), so **no
-Python or pip is needed**. Coverage is **Apple-Silicon macOS + Linux
+Python or pip is needed**. Coverage is **Apple-Silicon macOS and Linux
 (arm64 / x86_64)**; there is no Intel-macOS binary, so `brew install` on an Intel
 mac fails fast with a clear message. Upgrade with `brew upgrade soap-tui`. The
 tap and its Intel-mac note live at
@@ -68,7 +69,7 @@ curl -fsSL https://raw.githubusercontent.com/GhifariArsa/soap/main/install.sh | 
 Set `SOAP_VERSION=v0.1.0` to pin a release or `SOAP_INSTALL_DIR` to change the
 install directory. The installer requires a published release.
 
-**From PyPI** (needs [uv](https://docs.astral.sh/uv/) and Python **3.14+**):
+**From PyPI** (requires [uv](https://docs.astral.sh/uv/) and Python **3.14+**):
 
 ```sh
 uv tool install soap-tui
@@ -98,15 +99,16 @@ The default library is `~/.soap`; `SOAP_DIR` changes the default, and `--path
 export line when no shell can be detected). A fresh library sets
 `always_review: true`, and re-running `init` never overwrites an existing config.
 
-| option | use |
+| Option | Description |
 | --- | --- |
 | `--path <dir>` | Initialize a different library. |
 | `--shell auto\|zsh\|bash\|fish` | Choose the shell config to update. |
 | `--force` | Reinitialize an existing library; destructive, but backs up the old database. |
 
-## use it
+## Usage
 
-Dead simple: **add a source, review it, then run `soap` to browse.**
+The core workflow is straightforward: **add a source, review it, then run
+`soap` to browse.**
 
 From a checkout, prefix commands with `uv run`; an installed copy uses `soap`
 directly.
@@ -135,9 +137,9 @@ soap add ~/papers/paper.pdf --no-fetch \
 
 `SOURCE` can be a local file, directory, URL, DOI, or bare arXiv ID; ISBN
 metadata comes from `--isbn`, and identifiers can be passed explicitly with
-`--doi` or `--arxiv`. The options most people need:
+`--doi` or `--arxiv`. The most commonly used options:
 
-| option | use |
+| Option | Description |
 | --- | --- |
 | `--title`, `--author`, `--year`, `--type` | Override metadata. `--author` is repeatable. |
 | `--tag`, `--collection` | Add repeatable tags or collections. |
@@ -149,9 +151,9 @@ metadata comes from `--isbn`, and identifiers can be passed explicitly with
 | `--force` | Add even when a duplicate is detected. |
 | `--path <dir>` | Use a library other than `$SOAP_DIR` or `~/.soap`. |
 
-`soap add --help` and `soap inbox review --help` list every option.
+Run `soap add --help` and `soap inbox review --help` to list every option.
 
-### reviewing the inbox
+### Reviewing the inbox
 
 `soap inbox review` presents one `needs_review` record at a time:
 
@@ -164,12 +166,12 @@ metadata comes from `--isbn`, and identifiers can be passed explicitly with
 
 The TUI review screen shares the same review core: `enter`/`a` files, `c`
 corrects, `e` opens `$EDITOR`, `s` skips, and `q`/`esc` finishes. `soap add
---confirm` gives you the same guided field correction during an add.
+--confirm` provides the same guided field correction during an add.
 
-### keybindings
+### Keybindings
 
-Run `soap` with no subcommand to open the TUI. Press `?` any time for the in-app
-reference; here's the compact map for the main screen.
+Run `soap` with no subcommand to open the TUI. Press `?` at any time for the
+in-app reference; the compact map for the main screen is below.
 
 ```
  j / k · g / G        move · jump to top / bottom
@@ -187,7 +189,7 @@ reference; here's the compact map for the main screen.
  q                    quit
 ```
 
-## how the workflow fits together
+## How the workflow fits together
 
 1. **Initialize once.** `soap init` creates the library, its SQLite index, and a
    shell export for `SOAP_DIR`.
@@ -207,15 +209,15 @@ direct-PDF URLs download a PDF on a best-effort basis, and an open-access DOI ma
 too; a paywall or failed download still saves the metadata. soap does **not**
 parse PDF contents.
 
-## config & data
+## Configuration and data
 
-The library path resolves in this order:
+The library path resolves in the following order:
 
 1. `--path <dir>` where the option is available (`init`, `add`, `inbox review`)
 2. `$SOAP_DIR`
 3. `~/.soap`
 
-Its important files look like this:
+Its important files are laid out like this:
 
 ```text
 $SOAP_DIR/
@@ -235,12 +237,12 @@ mutate the same library, and the on-disk record stays readable and
 version-controllable without the index.
 
 The review **inbox is a `needs_review` status**, not a second copy of the
-document: records and their attachments stay under `documents/<citekey>/` until
-they're filed, skipped, or deleted. A new citekey names both the document folder
+document: records and their attachments remain under `documents/<citekey>/` until
+they are filed, skipped, or deleted. A new citekey names both the document folder
 and its `info.yaml`; correcting a record during review keeps that citekey, and
 only a new add derives a fresh key.
 
-## themes
+## Themes
 
 Tags are edited from the selected document with `t` and double as sidebar
 filters. The TUI ships with the `aqua-slate` (default), `one-dark`, and
@@ -250,10 +252,10 @@ filters. The TUI ships with the `aqua-slate` (default), `one-dark`, and
 See [the theme format](docs/themes.md) and the
 [example theme](docs/example-theme.yaml) to build your own.
 
-## contributing
+## Contributing
 
-soap is a normal Python project managed with [uv](https://docs.astral.sh/uv/).
-Run the tests with:
+soap is a standard Python project managed with
+[uv](https://docs.astral.sh/uv/). Run the tests with:
 
 ```sh
 uv run pytest
@@ -262,6 +264,6 @@ uv run pytest
 Issues and pull requests are welcome. The distribution is named `soap-tui`; the
 installed command is `soap`.
 
-## license
+## License
 
 [MIT](LICENSE).

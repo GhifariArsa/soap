@@ -270,6 +270,10 @@ uv run pytest
 Issues and pull requests are welcome. The distribution is named `soap-tui`; the
 installed command is `soap`.
 
+The demo GIFs above are regenerated from seeded, throwaway data with
+`uv run python scripts/demo.py` (needs [VHS](https://github.com/charmbracelet/vhs)) —
+see [docs/releasing.md](docs/releasing.md#regenerating-the-demo-gifs).
+
 ## License
 
 [MIT](LICENSE).

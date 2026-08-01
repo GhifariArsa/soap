@@ -148,3 +148,31 @@ the last manually-pinned version until the secret is added.
   0.29.0 --locked`. The macOS build also sets `MACOSX_DEPLOYMENT_TARGET=13.0`
   so native code compiled on the current runner stays back-compatible to
   macOS 13.
+
+## Regenerating the demo GIFs
+
+The README's two demo GIFs — `docs/demo.gif` (the TUI overview) and
+`docs/add.gif` (the `soap add` flow) — are **generated**, not hand-recorded.
+The source of truth is a pair of [VHS](https://github.com/charmbracelet/vhs)
+tapes plus a Python driver:
+
+- `scripts/demo.tape` / `scripts/demo-add.tape` — the recorded keystrokes,
+  using soap's real keybindings and an offline (`--no-fetch`) `soap add`.
+- `scripts/demo.py` — seeds a throwaway library (invented papers + a placeholder
+  `sample.pdf`) under a temp `HOME`/`SOAP_DIR`, renders both tapes, and cleans
+  up. Nothing from your real library, home directory, or the network is touched.
+
+**Prerequisites:** `vhs`, and its `ttyd` + `ffmpeg` dependencies, on `PATH`.
+On macOS: `brew install vhs` (pulls in ttyd + ffmpeg).
+
+**Regenerate both GIFs:**
+
+```sh
+uv run python scripts/demo.py
+```
+
+Re-runs are deterministic (fixed ids/titles/`added_at` for the seed set) and
+write straight over `docs/demo.gif` and `docs/add.gif`. To tweak the walkthrough,
+edit the `.tape` files (they are commented); to change the seeded library, edit
+the `DOCS` list in `scripts/demo.py` (the same fake-library idea as
+`scripts/shoot_tui.py`, which shoots the static reference screenshots).

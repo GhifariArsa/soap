@@ -147,3 +147,79 @@ jobs:
           files: |
             artifacts/soap-*
             checksums.txt
+
+  # ── Bump the Homebrew tap (GhifariArsa/homebrew-soap) to this release. A small
+  # committed script (scripts/bump_homebrew_formula.py) rewrites the three
+  # per-platform url/sha256 pairs in Formula/soap-tui.rb from this release's
+  # checksums.txt, then pushes to the tap so `brew upgrade soap-tui` works right
+  # after the release. (We rewrite in-place instead of `brew bump-formula-pr`
+  # because the tap ships a multi-platform *binary* formula with three nested
+  # url/sha256 pairs plus an Intel-mac `odie`, which the single-URL bumper does
+  # not model.) Gated on a real tag push.
+  #
+  # Requires a repo secret HOMEBREW_TAP_TOKEN — a fine-grained PAT scoped to
+  # GhifariArsa/homebrew-soap with Contents: read and write — used only to check
+  # out and push the tap (nothing is hardcoded; see docs/releasing.md). If the
+  # secret is unset the job no-ops with a notice instead of failing the release,
+  # so the manually-pinned formula keeps working until the secret is added.
+  homebrew-bump:
+    name: bump Homebrew tap
+    needs: [validate, build-binaries, publish-pypi, github-release]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read # read this release's checksums.txt via the default token
+    steps:
+      # Secrets cannot be referenced in `if:` conditions, so gate on an output.
+      - name: Guard on tap token
+        id: guard
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "${HOMEBREW_TAP_TOKEN}" ]; then
+            echo "::notice::HOMEBREW_TAP_TOKEN is not set; skipping Homebrew tap bump."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        if: steps.guard.outputs.run == 'true'
+
+      - name: Download release checksums
+        if: steps.guard.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release download "${GITHUB_REF_NAME}"
+          --repo "${GITHUB_REPOSITORY}"
+          --pattern checksums.txt --dir .
+
+      - name: Check out the tap
+        if: steps.guard.outputs.run == 'true'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: GhifariArsa/homebrew-soap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Bump formula
+        if: steps.guard.outputs.run == 'true'
+        run: >-
+          python3 scripts/bump_homebrew_formula.py
+          tap/Formula/soap-tui.rb "${GITHUB_REF_NAME}" checksums.txt
+
+      - name: Commit and push
+        if: steps.guard.outputs.run == 'true'
+        working-directory: tap
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- Formula/soap-tui.rb; then
+            echo "Formula already up to date; nothing to push."
+            exit 0
+          fi
+          git add Formula/soap-tui.rb
+          git commit -m "soap ${GITHUB_REF_NAME}"
+          git push

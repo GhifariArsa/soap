@@ -10,7 +10,25 @@ records; then browse, search, tag, and open your library from a keyboard-driven 
 
 ### Install
 
-soap needs [uv](https://docs.astral.sh/uv/) and Python **3.14 or newer**.
+soap needs [uv](https://docs.astral.sh/uv/) and Python **3.14 or newer** —
+**except** via Homebrew, which delivers a self-contained binary that needs
+neither.
+
+#### Homebrew (recommended — no Python required)
+
+```bash
+brew tap GhifariArsa/soap
+brew install soap-tui
+```
+
+Or in one command: `brew install GhifariArsa/soap/soap-tui`. Homebrew installs a
+self-contained binary (embedded CPython 3.14 via PyApp), so **no Python or pip
+is needed**. Coverage is **Apple-Silicon macOS + Linux (arm64/x86_64)**; there
+is no Intel-macOS binary, so `brew install` on an Intel mac fails fast with a
+clear message. Upgrade with `brew upgrade soap-tui`. The tap and its Intel-mac
+note live at [GhifariArsa/homebrew-soap](https://github.com/GhifariArsa/homebrew-soap).
+
+#### From source
 
 The simplest way to try the project is from a checkout:
 

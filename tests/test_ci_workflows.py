@@ -89,3 +89,28 @@ def test_pypi_keeps_oidc_least_privilege_and_environment_gate() -> None:
     assert publish["environment"] == "pypi"
     assert publish["permissions"] == {"id-token": "write"}
     assert "contents" not in publish["permissions"]
+
+
+def test_homebrew_bump_is_tag_gated_and_token_scoped() -> None:
+    workflow = _workflow("release.yml")
+    bump = workflow["jobs"]["homebrew-bump"]
+
+    # Runs only after the release exists, and only on a real tag push.
+    assert set(bump["needs"]) == {
+        "validate",
+        "build-binaries",
+        "publish-pypi",
+        "github-release",
+    }
+    assert bump["if"] == "startsWith(github.ref, 'refs/tags/v')"
+
+    # Cross-repo push auth comes only from the secret; nothing is hardcoded.
+    text = (WORKFLOWS / "release.yml").read_text()
+    assert "secrets.HOMEBREW_TAP_TOKEN" in text
+    assert bump["permissions"] == {"contents": "read"}
+    checkout = next(step for step in bump["steps"] if step.get("with", {}).get("path") == "tap")
+    assert checkout["with"]["repository"] == "GhifariArsa/homebrew-soap"
+    assert checkout["with"]["token"] == "${{ secrets.HOMEBREW_TAP_TOKEN }}"
+
+    # The committed bump script the job invokes must exist.
+    assert (ROOT / "scripts" / "bump_homebrew_formula.py").is_file()

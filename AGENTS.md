@@ -122,8 +122,22 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   workflows; the publish/release jobs are tag-gated (skipped on dispatch).
   PyApp knobs, the one-time PyPI pending-publisher setup, and the captain-gated
   public steps are documented in `docs/releasing.md`. The frozen TUI is smoke-tested
-  under a pty by `scripts/tui_smoke.py`. Homebrew bump is intentionally NOT here
-  (separate task).
+  under a pty by `scripts/tui_smoke.py`.
+
+- **Homebrew distribution:** the public tap is a SEPARATE repo,
+  `GhifariArsa/homebrew-soap` (`brew install GhifariArsa/soap/soap-tui`). Its
+  `Formula/soap-tui.rb` is a **binary** formula — downloads the prebuilt release
+  binaries, no Python/source build — with per-platform `on_macos`/`on_linux` +
+  `on_arm`/`on_intel` `url`/`sha256` pairs and NO `version` stanza (Homebrew
+  scans it from the URL; adding one fails `brew audit`). There is deliberately no
+  Intel-macOS binary, so the Intel-mac branch `odie`s. The `homebrew-bump` job in
+  `release.yml` keeps it current: it runs `scripts/bump_homebrew_formula.py`
+  (stdlib-only regex rewrite of the three url/sha256 pairs from the release
+  `checksums.txt` — NOT `brew bump-formula-pr`, which can't model the multi-block
+  binary formula) and pushes to the tap using the `HOMEBREW_TAP_TOKEN` repo secret
+  (fine-grained PAT, Contents:rw on the tap; job no-ops if unset). Setup +
+  rationale: `docs/releasing.md`; regression coverage in `tests/test_ci_workflows.py`
+  + `tests/test_bump_homebrew.py`.
 
 - **Self-update:** `soap self update` is OUR Typer subcommand (PyApp's `self` group is
   off via `PYAPP_SELF_COMMAND=none`), all in `soap/cli/selfupdate.py`, wired in

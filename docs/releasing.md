@@ -50,6 +50,7 @@ That's it. The tag drives:
 | `build-binaries` | `soap-<target>` binaries for macOS arm64 + Linux x86_64/arm64, each with a `.sha256` |
 | `publish-pypi` | wheel + sdist uploaded to PyPI (`soap-tui`) via Trusted Publishing |
 | `github-release` | a public Release attaching the three binaries + a combined `checksums.txt` |
+| `homebrew-bump` | pushes the new version + sha256s to the `homebrew-soap` tap formula (see below) |
 
 Targets are **macOS + Linux only** (no Windows for v1) and binaries are shipped
 **unsigned** (macOS notarization deferred — `curl|sh`/direct downloads hit
@@ -92,11 +93,45 @@ on by default.
 After the pending publisher's first successful upload it becomes a normal
 Trusted Publisher; nothing changes for subsequent tags.
 
+## Homebrew tap auto-bump
+
+soap is distributed via Homebrew through the public tap
+[`GhifariArsa/homebrew-soap`](https://github.com/GhifariArsa/homebrew-soap)
+(`brew install GhifariArsa/soap/soap-tui`). The tap ships a **binary** formula
+that downloads the prebuilt release binaries — it has no Python dependency and
+never builds from source. There is deliberately no Intel-macOS binary, so the
+formula `odie`s with a clear message on Intel macs (documented in the tap
+README).
+
+The `homebrew-bump` job in `release.yml` keeps the formula current: on every
+`v*` tag it downloads that release's `checksums.txt` and runs
+`scripts/bump_homebrew_formula.py`, which rewrites the three per-platform
+`url`/`sha256` pairs in `Formula/soap-tui.rb`, then commits and pushes to the
+tap. (We rewrite in place rather than `brew bump-formula-pr` because the formula
+is a multi-platform binary formula with three nested `url`/`sha256` blocks plus
+the Intel-mac `odie`, which the single-URL bumper does not model.)
+
+### One-time secret setup (captain-gated)
+
+The job needs cross-repo push access to the tap. This is the **only** manual
+step, and it must be done before the first auto-bump runs (the initial formula
+is pinned by hand, so Homebrew works immediately regardless):
+
+1. Create a **fine-grained personal access token** (GitHub → Settings →
+   Developer settings → Fine-grained tokens) scoped to **only** the
+   `GhifariArsa/homebrew-soap` repository, with **Repository permissions →
+   Contents: Read and write**. No other permissions are needed.
+2. On the `soap` repo, add it as a repository secret named exactly
+   **`HOMEBREW_TAP_TOKEN`** (Settings → Secrets and variables → Actions → New
+   repository secret). The workflow references `secrets.HOMEBREW_TAP_TOKEN`;
+   nothing is ever hardcoded or committed.
+
+If the secret is absent, `homebrew-bump` **no-ops with a notice** instead of
+failing the release — so a release still succeeds, and Homebrew keeps serving
+the last manually-pinned version until the secret is added.
+
 ## What is deliberately *not* here
 
-- **Homebrew bump** — ships with the separate Homebrew task; it needs the public
-  tap repo `GhifariArsa/homebrew-soap` and a push secret, so it lives in its own
-  captain-gated step, not this workflow.
 - **macOS code-signing / notarization** — deferred for v1 (no Apple Developer
   account yet); no `codesign`/`notarytool` steps are present.
 - **Windows** — out of scope for v1.

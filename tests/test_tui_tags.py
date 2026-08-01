@@ -16,7 +16,7 @@ from soap.tui.app import SoapApp
 from soap.tui.tags import TagEditScreen
 from soap.tui.widgets import DocumentList, Sidebar, SidebarRow
 
-from textual.widgets import Input
+from textual.widgets import Input, Label
 
 
 def _seed(library, make_pdf, name: str, tags: list[str] | None = None) -> str:
@@ -186,6 +186,37 @@ def test_sidebar_tag_filters_list(library, make_pdf):
         assert doclist.row_count == 1
         assert doclist.current_id == a
         assert "# ml" in str(doclist.border_title)
+
+    _drive_app(library, check)
+
+
+def test_sidebar_long_tag_truncates_to_one_line(library, make_pdf):
+    """A long, unbreakable tag must clip to one line with an ellipsis, not
+    collapse to a bare ``#``.
+
+    Regression: ``.side-row`` is ``height: 1`` and ``.side-label`` used default
+    word-wrap, so a no-space tag wider than the sidebar wrapped onto a hidden
+    second line and rendered as just ``#`` (the name vanished). The label now
+    sets ``text-wrap: nowrap`` + ``text-overflow: ellipsis`` (matching the
+    DocumentList columns), so the name stays visible on the single row line.
+    """
+    long_tag = "reinforcement-learning-from-human-feedback-alignment-methodology"
+    _seed(library, make_pdf, "a.pdf", tags=[long_tag])
+
+    async def check(pilot, app):
+        row = None
+        for item in app.query_one(Sidebar).children:
+            if isinstance(item, SidebarRow) and item.kind == "tag":
+                row = item
+                break
+        assert row is not None and row.value == long_tag
+        label = row.query_one(".side-label", Label)
+        # The row stays a single line — no hidden wrapped overflow.
+        assert label.size.height == 1
+        first_line = label.render_line(0).text
+        # The name is visible and ellipsis-truncated, not collapsed to "#".
+        assert first_line.startswith("# reinforcement")
+        assert first_line.rstrip().endswith("…")
 
     _drive_app(library, check)
 

@@ -179,7 +179,9 @@ in-app reference; the compact map for the main screen is below.
  Tab / Shift-Tab      cycle panes      h / l   focus left / right
  enter / o            open the selected file or URL
  /                    search title, author, tag, or DOI (Enter/Tab → list)
- e                    edit the selected document's metadata in $EDITOR
+ E                    edit the core fields (title/authors/year/type/venue) in an in-app form
+ e                    edit the complete `info.yaml` in $EDITOR (full power option)
+ d                    delete the selected document and its files (asks to confirm)
  t                    edit tags (Enter/comma adds · Tab completes · Ctrl-S saves · Esc cancels)
  m                    cycle read status: unread → reading → read
  r                    review the inbox

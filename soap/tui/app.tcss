@@ -183,7 +183,7 @@ ReviewScreen, HelpScreen, TagEditScreen {
     background: $background 70%;
 }
 
-#review-card, #help-card, #empty-card, #tag-card {
+#review-card, #help-card, #empty-card, #tag-card, #edit-card, #confirm-card {
     width: 74;
     max-width: 90%;
     height: auto;
@@ -192,6 +192,33 @@ ReviewScreen, HelpScreen, TagEditScreen {
     border-title-color: $primary;
     border-title-align: left;
     padding: 1 3;
+}
+
+/* --- in-app edit form + delete confirm --------------------------------- */
+
+#edit-facts {
+    padding: 1 0 0 0;
+    color: $text-muted;
+}
+#edit-hint {
+    height: auto;
+    margin: 1 0 0 0;
+    border-top: solid $border;
+    padding: 1 0 0 0;
+}
+
+#confirm-card {
+    border: round $error;
+    border-title-color: $error;
+}
+#confirm-body {
+    height: auto;
+}
+#confirm-hint {
+    height: auto;
+    margin: 1 0 0 0;
+    border-top: solid $border;
+    padding: 1 0 0 0;
 }
 
 #review-progress {

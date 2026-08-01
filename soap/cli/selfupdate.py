@@ -78,7 +78,7 @@ class Channel(str, Enum):
 #: The upgrade command to print for each package-manager channel. The binary
 #: channel is absent because it is the one we handle ourselves.
 UPGRADE_COMMANDS: dict[Channel, str] = {
-    Channel.HOMEBREW: "brew upgrade soap",
+    Channel.HOMEBREW: "brew upgrade soap-tui",
     Channel.UV_TOOL: f"uv tool upgrade {DIST_NAME}",
     Channel.PIPX: f"pipx upgrade {DIST_NAME}",
     Channel.PIP: f"pip install -U {DIST_NAME}",

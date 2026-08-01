@@ -111,7 +111,7 @@ def test_detect_channel_pyapp_env_wins():
 @pytest.mark.parametrize(
     "channel, expected",
     [
-        (Channel.HOMEBREW, "brew upgrade soap"),
+        (Channel.HOMEBREW, "brew upgrade soap-tui"),
         (Channel.UV_TOOL, "uv tool upgrade soap-tui"),
         (Channel.PIPX, "pipx upgrade soap-tui"),
         (Channel.PIP, "pip install -U soap-tui"),
@@ -131,7 +131,7 @@ def test_perform_update_non_binary_prints_command(monkeypatch):
         client=_client({}), current="0.1.0", echo=echo, exe_path=Path("/x")
     )
     assert code == 0
-    assert any("brew upgrade soap" in line for line in lines)
+    assert any("brew upgrade soap-tui" in line for line in lines)
 
 
 # --- Update flow (binary channel) -------------------------------------------

@@ -154,6 +154,12 @@ DataTable > .datatable--odd-row {
 }
 .side-label {
     width: 1fr;
+    /* A tag/collection name can be long and unbreakable; the row is height: 1,
+       so default word-wrap would push the name onto a hidden second line and a
+       no-space tag collapses to a bare "#". Clip to one line with an ellipsis,
+       matching the DocumentList columns (no_wrap + overflow="ellipsis"). */
+    text-wrap: nowrap;
+    text-overflow: ellipsis;
 }
 .side-count {
     width: auto;

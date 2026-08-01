@@ -59,7 +59,15 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   (`CORE_REVIEW_FIELDS`: title/authors/year/type/venue), prefilled, Enter-keeps /
   type-overrides. It **pins the citekey/id** on a review-edit (never renames the
   folder); only a brand-new `add()` derives a fresh key. Shared by the CLI `[c]orrect`
-  action, the TUI review form, and `soap add --confirm`.
+  action, the TUI review form, the TUI browser's `E` in-app edit form
+  (`soap/tui/edit.py`), and `soap add --confirm`.
+- **Browser edit/delete reuse the review core.** The main browser
+  (`soap/tui/app.py`) exposes `E` (in-app core-field edit → `EditScreen` in
+  `soap/tui/edit.py`, which drives `prompt_fields`+`save_document`, id pinned) and
+  `d` (delete → `ConfirmDeleteScreen` in `soap/tui/confirm.py` → `delete_document`).
+  `e` stays the full-YAML `$EDITOR` power option. Both go through the library helpers
+  (never the DB); delete is confirm-gated. Pilot coverage:
+  `tests/test_tui_browser_edit_delete.py`.
 - **`always_review: true`** is the shipped default (`soap/cli/init.py`), so the review
   queue is the primary add path — weight review UX accordingly.
 - **TUI is view-only over theme tokens.** The "Aqua Slate" redesign lives entirely in

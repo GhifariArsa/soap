@@ -29,12 +29,15 @@ from soap.config import load_config, save_theme
 from soap.db.documents import DocumentService
 from soap.library import (
     Library,
+    delete_document,
     edit_document,
     resolve_file_ref_path,
     set_read_status,
 )
 from soap.models.document import ReadStatus
 from soap.tui._markup import key, sep
+from soap.tui.confirm import ConfirmDeleteScreen
+from soap.tui.edit import EditScreen
 from soap.tui.review import ReviewScreen
 from soap.tui.tags import TagEditScreen
 from soap.tui.themes import BUNDLED_THEMES, DEFAULT_THEME, load_user_themes
@@ -61,6 +64,8 @@ def _cheatbar(inbox: int) -> str:
             key("enter", "open"),
             key("/", "find"),
             key("t", "tags"),
+            key("E", "edit"),
+            key("d", "del"),
             key("m", "mark"),
             review,
             key("tab", "pane"),
@@ -119,6 +124,9 @@ class HelpScreen(ModalScreen[None]):
                 ("enter / o", "open file"),
                 ("/", "search"),
                 ("t", "edit tags"),
+                ("E", "edit fields"),
+                ("e", "edit YAML ($EDITOR)"),
+                ("d", "delete document"),
                 ("m", "cycle read status"),
                 ("r", "review inbox"),
             ],
@@ -186,6 +194,8 @@ class SoapApp(App):
         Binding("r", "review", "review inbox", show=False),
         Binding("t", "edit_tags", "edit tags", show=False),
         Binding("e", "edit_metadata", "edit metadata", show=False),
+        Binding("E", "edit_fields", "edit fields", show=False),
+        Binding("d", "delete", "delete", show=False),
         Binding("m", "cycle_read_status", "cycle read status", show=False),
         Binding("question_mark", "help", "help", show=False, key_display="?"),
         Binding("tab", "focus_pane(1)", "Next pane", show=False),
@@ -475,6 +485,66 @@ class SoapApp(App):
             doclist.move_cursor(row=ids.index(doc_id))
         self._show_detail(doc_id)
         self.notify("metadata saved")
+
+    def action_edit_fields(self) -> None:
+        """Edit the selected document's core fields in an in-app form.
+
+        The quick, keyboard-first counterpart to ``e`` → ``$EDITOR``: reuses the
+        review flow's inline correction core (``prompt_fields``) so the citekey is
+        pinned (never a folder rename) and persistence goes through
+        ``save_document``. ``e`` remains the full-YAML power option.
+        """
+        doc_id = self.query_one(DocumentList).current_id
+        if self.docs is None or doc_id is None:
+            return
+        doc = self.docs.get_document(doc_id)
+        if doc is None:
+            return
+        self.push_screen(
+            EditScreen(self.library, self.docs, doc),
+            lambda saved: self._after_edit_fields(doc_id, saved),
+        )
+
+    def _after_edit_fields(self, doc_id: str, saved: str | None) -> None:
+        # None = cancelled / not saved; a str = the (pinned) document id.
+        if saved is None:
+            return
+        self.refresh_data(selected_id=doc_id)
+        # refresh_data rebuilds the table; keep the cursor on the edited row.
+        doclist = self.query_one(DocumentList)
+        ids = getattr(doclist, "_ids", [])
+        if doc_id in ids:
+            doclist.move_cursor(row=ids.index(doc_id))
+        self._show_detail(doc_id)
+        self.notify("metadata saved")
+
+    def action_delete(self) -> None:
+        """Delete the selected document and its files, after confirmation."""
+        doc_id = self.query_one(DocumentList).current_id
+        if self.docs is None or doc_id is None:
+            return
+        doc = self.docs.get_document(doc_id)
+        if doc is None:
+            return
+        self.push_screen(
+            ConfirmDeleteScreen(doc),
+            lambda confirmed: self._after_confirm_delete(doc_id, confirmed),
+        )
+
+    def _after_confirm_delete(self, doc_id: str, confirmed: bool | None) -> None:
+        if not confirmed or self.docs is None:
+            return
+        try:
+            delete_document(self.library, doc_id, self.docs)
+        except Exception as exc:  # noqa: BLE001 - surface, never crash the app
+            self.notify(f"could not delete {doc_id}: {exc}", severity="error")
+            return
+        # Rebuild the list + sidebar tag/status counts; the deleted row is gone,
+        # so let the list settle on whatever now sits under the cursor.
+        self.refresh_data()
+        doclist = self.query_one(DocumentList)
+        self._show_detail(doclist.current_id)
+        self.notify("document deleted")
 
     def action_edit_tags(self) -> None:
         doc_id = self.query_one(DocumentList).current_id

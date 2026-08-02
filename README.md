@@ -189,6 +189,7 @@ in-app reference; the compact map for the main screen is below.
  t                    tag — additive bulk-tag across the selection, or the single-document editor
  m                    cycle read status: unread → reading → read
  space                mark / unmark the row; marks drive t / d / x on the whole selection
+ u                    unselect all (clear the whole selection; no-op when nothing is marked)
  x                    export to BibTeX (choose scope: selected / filtered / all)
  r                    review the inbox
  Ctrl-R               refresh from disk
@@ -210,7 +211,8 @@ bulk ones:
 With nothing marked, `t`/`d` act on the single row under the cursor exactly as
 before. A bulk `t`/`d` consumes the selection (it clears once the action
 completes); cancelling a confirm leaves both the documents and the selection
-untouched.
+untouched. Press `u` to clear the whole selection at once (a no-op when nothing
+is marked); it's also in the `?` reference and the command palette.
 
 ### Exporting to BibTeX
 
@@ -223,10 +225,12 @@ library:
   and `/` search)
 - **all** — every record in the library
 
-You then enter a destination path (a missing extension defaults to `.bib`). soap
-writes a deterministic `.bib` file — entries ordered by citekey, values safely
-escaped — using each document's citekey as the entry key and its metadata for the
-fields. The export only reads the library: it never mutates anything or touches
+You then enter a destination path. A relative name is saved under the directory
+you launched `soap` from (shown in the modal), not the library; `~` and absolute
+paths work too, and a missing extension defaults to `.bib`. The modal shows a
+live `saves to …` preview of the exact resolved file. soap writes a deterministic
+`.bib` file — entries ordered by citekey, values safely escaped — using each
+document's citekey as the entry key and its metadata for the fields. The export only reads the library: it never mutates anything or touches
 the network, and it reports how many records were written (and any skipped for
 incomplete metadata). The same action is reachable from the `Ctrl-P` command
 palette as **Export BibTeX**.

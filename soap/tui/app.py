@@ -130,6 +130,7 @@ class HelpScreen(ModalScreen[None]):
                 ("d", "delete document"),
                 ("m", "cycle read status"),
                 ("space", "mark / unmark"),
+                ("u", "clear selection"),
                 ("x", "export BibTeX"),
                 ("r", "review inbox"),
             ],
@@ -201,6 +202,7 @@ class SoapApp(App):
         Binding("d", "delete", "delete", show=False),
         Binding("m", "cycle_read_status", "cycle read status", show=False),
         Binding("space", "toggle_mark", "mark", show=False),
+        Binding("u", "clear_selection", "clear selection", show=False),
         Binding("x", "export", "export BibTeX", show=False),
         Binding("question_mark", "help", "help", show=False, key_display="?"),
         Binding("tab", "focus_pane(1)", "Next pane", show=False),
@@ -696,6 +698,17 @@ class SoapApp(App):
         if row + 1 < doclist.row_count:
             doclist.move_cursor(row=row + 1)
 
+    def action_clear_selection(self) -> None:
+        """Unselect all marked rows at once. Quiet, and a no-op when nothing is marked."""
+        doclist = self.query_one(DocumentList)
+        if not doclist.marked:
+            return  # harmless no-op
+        current = doclist.current_id
+        doclist.clear_marks()
+        # Re-render so the markers disappear — that vanishing is the only feedback;
+        # clearing stays quiet, exactly like marking (no selection-count toast).
+        self._populate_list(selected_id=current)
+
     def action_export(self) -> None:
         """Export library records to a BibTeX file, after a scope + destination choice."""
         if self.docs is None:
@@ -722,7 +735,9 @@ class SoapApp(App):
             return
         default = "soap-selected.bib" if scope == "selected" else "soap-library.bib"
         self.push_screen(
-            ExportDestinationScreen(count=len(ids), default_path=default),
+            ExportDestinationScreen(
+                count=len(ids), default_path=default, cwd=Path.cwd()
+            ),
             lambda path: self._after_export_destination(ids, path),
         )
 
@@ -747,9 +762,9 @@ class SoapApp(App):
         docs = [self.docs.get_document(i) for i in ids]
         documents = [d for d in docs if d is not None]
         result = serialize_documents(documents)
-        target = Path(path).expanduser()
-        if target.suffix == "":
-            target = target.with_suffix(".bib")
+        # ``path`` is already the fully resolved absolute destination (the modal
+        # resolved cwd/~/suffix), so what we write matches the preview exactly.
+        target = Path(path)
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(result.text, encoding="utf-8")
@@ -776,6 +791,11 @@ class SoapApp(App):
                 "Export BibTeX",
                 "Export selected, filtered, or all records to a .bib file",
                 self.action_export,
+            )
+            yield SystemCommand(
+                "Clear selection",
+                "Unselect all marked documents",
+                self.action_clear_selection,
             )
 
     def action_help(self) -> None:

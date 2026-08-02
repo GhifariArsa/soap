@@ -9,12 +9,18 @@ matching ``tests/test_tui_browser_edit_delete.py``.
 
 import asyncio
 
+from pathlib import Path
+
 from soap.library import add
 from soap.tui.app import SoapApp
-from soap.tui.export import ExportDestinationScreen, ExportScopeScreen
+from soap.tui.export import (
+    ExportDestinationScreen,
+    ExportScopeScreen,
+    resolve_export_path,
+)
 from soap.tui.widgets import DocumentList
 
-from textual.widgets import Input
+from textual.widgets import Input, Static
 
 
 def _seed(library, make_pdf, name: str) -> str:
@@ -201,5 +207,81 @@ def test_export_default_extension_and_summary(library, make_pdf, tmp_path):
         await pilot.pause()
         # A missing extension gets ".bib" appended.
         assert (tmp_path / "libout.bib").exists()
+
+    _drive(library, check)
+
+
+# --- destination resolution + preview -----------------------------------------
+
+
+def test_resolve_export_path_relative_is_anchored_to_cwd():
+    cwd = Path("/work/dir")
+    assert resolve_export_path("out.bib", cwd) == Path("/work/dir/out.bib")
+    # A subdirectory relative path is anchored too.
+    assert resolve_export_path("sub/out.bib", cwd) == Path("/work/dir/sub/out.bib")
+
+
+def test_resolve_export_path_absolute_is_unchanged():
+    assert resolve_export_path("/tmp/x.bib", Path("/work/dir")) == Path("/tmp/x.bib")
+
+
+def test_resolve_export_path_expands_tilde():
+    resolved = resolve_export_path("~/x.bib", Path("/work/dir"))
+    assert resolved == Path.home() / "x.bib"
+    assert resolved.is_absolute()
+
+
+def test_resolve_export_path_adds_bib_suffix_only_when_missing():
+    cwd = Path("/work/dir")
+    assert resolve_export_path("libout", cwd) == Path("/work/dir/libout.bib")
+    # An existing (any) extension is preserved, not clobbered.
+    assert resolve_export_path("data.json", cwd) == Path("/work/dir/data.json")
+    assert resolve_export_path("refs.bib", cwd) == Path("/work/dir/refs.bib")
+
+
+def test_destination_modal_shows_cwd_and_live_resolved_preview(library, make_pdf):
+    _seed(library, make_pdf, "alpha.pdf")
+
+    async def check(pilot, app):
+        await pilot.press("x")
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        assert isinstance(app.screen, ExportDestinationScreen)
+        cwd = str(Path.cwd())
+        # The modal states the actual current directory.
+        body = app.screen.query_one("#export-dest-body", Static)
+        assert cwd in body.render().plain
+        # The default filename resolves to a preview under cwd.
+        preview = app.screen.query_one("#export-dest-preview", Static)
+        assert str(Path.cwd() / "soap-library.bib") in preview.render().plain
+        # Editing the path updates the preview live, including the .bib suffix.
+        app.screen.query_one("#export-dest", Input).value = "nested/refs"
+        await pilot.pause()
+        expected = str(Path.cwd() / "nested" / "refs.bib")
+        assert expected in app.screen.query_one("#export-dest-preview", Static).render().plain
+
+    _drive(library, check)
+
+
+def test_destination_modal_preview_handles_absolute_and_tilde(library, make_pdf):
+    _seed(library, make_pdf, "alpha.pdf")
+
+    async def check(pilot, app):
+        await pilot.press("x")
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, ExportDestinationScreen)
+        preview = screen.query_one("#export-dest-preview", Static)
+        # Absolute path shown verbatim.
+        screen.query_one("#export-dest", Input).value = "/tmp/mine.bib"
+        await pilot.pause()
+        assert "/tmp/mine.bib" in preview.render().plain
+        # Tilde expands in the preview.
+        screen.query_one("#export-dest", Input).value = "~/refs.bib"
+        await pilot.pause()
+        assert str(Path.home() / "refs.bib") in preview.render().plain
 
     _drive(library, check)

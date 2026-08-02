@@ -27,7 +27,28 @@ from textual.containers import Center, Horizontal, Middle, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Input, Static
 
+from pathlib import Path
+
+from rich.markup import escape
+
 from soap.tui._markup import key, sep
+
+
+def resolve_export_path(raw: str, cwd: Path) -> Path:
+    """Resolve a user-entered destination to the absolute path soap will write.
+
+    The single source of truth for destination resolution, shared by the modal's
+    live preview and the app's actual write so the two never drift. A relative
+    name is anchored to ``cwd`` — the directory soap was launched from, not the
+    library — ``~`` is expanded, and a missing extension gains ``.bib``.
+    """
+    p = Path(raw).expanduser()
+    if not p.is_absolute():
+        p = cwd / p
+    if p.suffix == "":
+        p = p.with_suffix(".bib")
+    return p
+
 
 _SCOPE_HINT = sep(2).join(
     [
@@ -141,10 +162,15 @@ class ExportDestinationScreen(ModalScreen[str | None]):
         Binding("escape", "cancel", "cancel", show=False),
     ]
 
-    def __init__(self, *, count: int, default_path: str) -> None:
+    def __init__(self, *, count: int, default_path: str, cwd: Path) -> None:
         super().__init__()
         self.count = count
         self.default_path = default_path
+        # The directory soap was launched from — relative names resolve against it
+        # (injected so the preview is testable). The screen dismisses the fully
+        # resolved absolute path, so what the preview shows is exactly what the
+        # app writes.
+        self.cwd = cwd
 
     def compose(self) -> ComposeResult:
         with Middle():
@@ -158,20 +184,43 @@ class ExportDestinationScreen(ModalScreen[str | None]):
                             classes="field-input",
                             placeholder="library.bib",
                         )
+                    yield Static("", id="export-dest-preview")
                     yield Static(_DEST_HINT, id="export-dest-hint")
 
     def on_mount(self) -> None:
         self.query_one("#export-dest-card").border_title = "⇩  EXPORT BibTeX"
         n = self.count
         self.query_one("#export-dest-body", Static).update(
-            f"[$foreground]Export[/]"
+            "[$foreground]Export[/]"
             + sep(1)
             + f"[b $foreground]{n}[/]"
             + sep(1)
-            + f"[$foreground]record{'s' if n != 1 else ''} to a .bib file.[/]"
+            + f"[$foreground]record{'s' if n != 1 else ''} to a .bib file.[/]\n"
+            + "[$text-muted]A relative name saves under the directory soap was "
+            + "launched from:[/]\n"
+            + f"[$text-muted]{escape(str(self.cwd))}[/]"
         )
         dest = self.query_one("#export-dest", Input)
         dest.value = self.default_path
+        self._render_preview(self.default_path)
+
+    def _render_preview(self, raw: str) -> None:
+        preview = self.query_one("#export-dest-preview", Static)
+        raw = raw.strip()
+        if not raw:
+            preview.update("[$text-muted]enter a filename above[/]")
+            return
+        resolved = resolve_export_path(raw, self.cwd)
+        preview.update(
+            "[$text-muted]saves to[/]"
+            + sep(1)
+            + f"[$accent]{escape(str(resolved))}[/]"
+        )
+
+    @on(Input.Changed, "#export-dest")
+    def _dest_changed(self, event: Input.Changed) -> None:
+        # Live preview: recompute the resolved absolute destination as the user types.
+        self._render_preview(event.value)
 
     @on(Input.Submitted)
     def _on_submit(self, event: Input.Submitted) -> None:
@@ -179,11 +228,13 @@ class ExportDestinationScreen(ModalScreen[str | None]):
         self.action_confirm()
 
     def action_confirm(self) -> None:
-        path = self.query_one("#export-dest", Input).value.strip()
-        if not path:
+        raw = self.query_one("#export-dest", Input).value.strip()
+        if not raw:
             self.app.notify("enter a destination path", severity="error")
             return
-        self.dismiss(path)
+        # Dismiss the fully resolved absolute path so the app writes exactly what
+        # the preview showed — no second, drift-prone resolution downstream.
+        self.dismiss(str(resolve_export_path(raw, self.cwd)))
 
     def action_cancel(self) -> None:
         self.dismiss(None)

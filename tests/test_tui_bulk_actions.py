@@ -191,6 +191,95 @@ def test_single_delete_when_nothing_marked(library, make_pdf):
 # --- reduced footer -----------------------------------------------------------
 
 
+# --- unselect all -------------------------------------------------------------
+
+
+def test_clear_selection_unmarks_all_quietly(library, make_pdf):
+    a = _seed(library, make_pdf, "alpha.pdf")
+    b = _seed(library, make_pdf, "beta.pdf")
+    c = _seed(library, make_pdf, "gamma.pdf")
+
+    async def check(pilot, app):
+        await _mark(pilot, app, a, b, c)
+        assert app.query_one(DocumentList).marked == {a, b, c}
+
+        notifications = []
+        orig = app.notify
+        app.notify = lambda *a, **k: notifications.append((a, k))  # type: ignore
+        try:
+            await pilot.press("u")
+            await pilot.pause()
+        finally:
+            app.notify = orig  # type: ignore
+
+        # Every mark cleared, and clearing stayed quiet (no toast).
+        assert app.query_one(DocumentList).marked == set()
+        assert notifications == []
+
+    _drive(library, check)
+
+
+def test_clear_selection_is_noop_when_nothing_marked(library, make_pdf):
+    a = _seed(library, make_pdf, "alpha.pdf")
+
+    async def check(pilot, app):
+        _select(app, a)
+        assert app.query_one(DocumentList).marked == set()
+        notifications = []
+        orig = app.notify
+        app.notify = lambda *a, **k: notifications.append((a, k))  # type: ignore
+        try:
+            await pilot.press("u")
+            await pilot.pause()
+        finally:
+            app.notify = orig  # type: ignore
+        # Harmless no-op: still nothing marked, nothing announced.
+        assert app.query_one(DocumentList).marked == set()
+        assert notifications == []
+
+    _drive(library, check)
+
+
+def test_clear_selection_does_not_fire_while_typing_in_search(library, make_pdf):
+    # Titles both contain "u" so a "u" search keeps them visible — isolating the
+    # question "did the u *action* fire?" from the separate filter-prunes-marks
+    # behavior of populate().
+    a = _seed(library, make_pdf, "ubuntu.pdf")
+    b = _seed(library, make_pdf, "under.pdf")
+
+    async def check(pilot, app):
+        await _mark(pilot, app, a, b)
+        assert app.query_one(DocumentList).marked == {a, b}
+        # Focus the search box and type a "u" — it must land in the field as text,
+        # not trigger the clear-selection action.
+        app.query_one("#search", Input).focus()
+        await pilot.pause()
+        await pilot.press("u")
+        await pilot.pause()
+        assert app.query_one("#search", Input).value == "u"
+        # Both documents still match the search, so if the u *action* had fired it
+        # would have cleared these still-visible marks. They survive → it didn't.
+        assert app.query_one(DocumentList).marked == {a, b}
+
+    _drive(library, check)
+
+
+def test_clear_selection_is_discoverable_in_help_and_palette(library, make_pdf):
+    _seed(library, make_pdf, "alpha.pdf")
+
+    async def check(pilot, app):
+        # Command palette: the app surfaces a "Clear selection" system command.
+        titles = [c.title for c in app.get_system_commands(app.screen)]
+        assert "Clear selection" in titles
+        # Full keyboard reference (?): the ACT column lists the u binding.
+        from soap.tui.app import HelpScreen
+
+        keys = [k for _, rows in HelpScreen._COLS for k, _ in rows]
+        assert "u" in keys
+
+    _drive(library, check)
+
+
 def test_footer_shows_reduced_concepts_including_help():
     # The persistent footer is built by _cheatbar(); assert on its markup so the
     # reduced concept set is pinned regardless of rendering.
@@ -208,3 +297,6 @@ def test_footer_shows_reduced_concepts_including_help():
     assert "quit" not in text
     assert "review" not in text
     assert "find" not in text
+    # Unselect-all is discoverable via ? / palette, deliberately not on the bar.
+    assert "clear" not in text
+    assert "unselect" not in text

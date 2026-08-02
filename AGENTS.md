@@ -89,9 +89,19 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `ExportScopeScreen`→`ExportDestinationScreen`; also in the `^p` palette). A bulk
   `t`/`d` consumes the selection (`clear_marks` on success), reports outcome +
   failures, and never touches the DB directly. With nothing marked, `t`/`d` keep
-  the single-document behavior. The persistent footer (`_cheatbar`) is reduced to
+  the single-document behavior. `u` (`action_clear_selection`) quietly unselects
+  all (no-op when empty); it lives in the `?` reference + `^p` palette,
+  deliberately NOT on the footer, and is safe next to search because a focused
+  `Input` consumes the keypress. The persistent footer (`_cheatbar`) is reduced to
   select/edit/tag/read/export/pane/`?`; the full reference (`?`) and palette
   (`^p`) stay discoverable off the bar. Coverage: `tests/test_tui_bulk_actions.py`.
+- **Export destination resolution is one shared function.**
+  `soap/tui/export.py:resolve_export_path(raw, cwd)` (relative→`cwd` = the launch
+  directory, not the library; `~` expanded; `.bib` added only when no suffix)
+  backs both the modal's live `saves to …` preview and its dismissed value, so
+  `ExportDestinationScreen` returns the fully resolved absolute path and the app
+  writes it verbatim — no second, drift-prone resolution. Coverage:
+  `tests/test_tui_export.py`.
 - **`always_review: true`** is the shipped default (`soap/cli/init.py`), so the review
   queue is the primary add path — weight review UX accordingly.
 - **TUI is view-only over theme tokens.** The "Aqua Slate" redesign lives entirely in

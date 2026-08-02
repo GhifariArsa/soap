@@ -82,3 +82,61 @@ class ConfirmDeleteScreen(ModalScreen[bool]):
 
     def action_cancel(self) -> None:
         self.dismiss(False)
+
+
+class ConfirmBulkDeleteScreen(ModalScreen[bool]):
+    """Confirm deleting several marked documents at once. Dismisses ``True``/``False``.
+
+    The bulk counterpart to :class:`ConfirmDeleteScreen`: one explicit,
+    count-aware gate for the whole selection rather than a prompt per document. It
+    states how many documents and attached files are about to be removed so the
+    choice is informed; cancelling makes no change.
+    """
+
+    AUTO_FOCUS = None
+
+    BINDINGS = [
+        Binding("y", "confirm", "delete", show=True),
+        Binding("enter", "confirm", "delete", show=False),
+        Binding("n", "cancel", "cancel", show=True),
+        Binding("escape", "cancel", "cancel", show=False),
+    ]
+
+    def __init__(self, documents: list[Document]) -> None:
+        super().__init__()
+        self.documents = documents
+
+    def compose(self) -> ComposeResult:
+        with Middle():
+            with Center():
+                with Vertical(id="confirm-card"):
+                    yield Static("", id="confirm-body")
+                    yield Static(_LEGEND, id="confirm-hint")
+
+    def on_mount(self) -> None:
+        n = len(self.documents)
+        files = sum(len(d.files) for d in self.documents)
+        self.query_one("#confirm-card").border_title = "⚠  DELETE DOCUMENTS"
+        titles = ", ".join(escape(d.title or d.id) for d in self.documents[:3])
+        if n > 3:
+            titles += f", … (+{n - 3} more)"
+        self.query_one("#confirm-body", Static).update(
+            "[$foreground]Delete[/]"
+            + sep(1)
+            + f"[b $foreground]{n}[/]"
+            + sep(1)
+            + f"[$foreground]selected document{'s' if n != 1 else ''}?[/]\n\n"
+            + f"[$text-muted]{titles}[/]\n\n"
+            + f"[$error]{files} attached file{'s' if files != 1 else ''}[/]"
+            + sep(2)
+            + "[$text-muted]·[/]"
+            + sep(2)
+            + "[$text-muted]removes each document folder and its files from disk "
+            + "— it cannot be undone.[/]"
+        )
+
+    def action_confirm(self) -> None:
+        self.dismiss(True)
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)

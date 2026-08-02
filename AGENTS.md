@@ -68,6 +68,40 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `e` stays the full-YAML `$EDITOR` power option. Both go through the library helpers
   (never the DB); delete is confirm-gated. Pilot coverage:
   `tests/test_tui_browser_edit_delete.py`.
+- **BibTeX export is read-only and pure.** `soap/bibtex.py` serializes
+  `Document`s to a deterministic `.bib` (entries ordered by citekey, entry key =
+  `id`, `type`→BibTeX type via `_TYPE_MAP` fallback `misc`, `venue`→`journal` or
+  `booktitle` by type, char-by-char LaTeX escaping — never sequential
+  `str.replace`, which re-escapes inserted braces). `serialize_documents` returns
+  a `BibtexResult` partitioning inputs into `exported_ids`/`skipped_ids` so
+  callers report drops instead of silently losing records. The app hydrates
+  chosen docs through `DocumentService.get_document` and writes the file — it
+  never mutates the library or hits the network. Coverage: `tests/test_bibtex.py`
+  + `tests/test_tui_export.py`.
+- **`space` marks rows; marks make `t`/`d`/`x` bulk-first.** `DocumentList.marked`
+  (`soap/tui/widgets.py`) tracks a selection (marker glyph replaces the status
+  glyph, pruned to present ids on `populate`); toggling is **quiet** (no toast).
+  When any row is marked, `t` opens the additive bulk-tag flow
+  (`soap/tui/tags.py:BulkTagScreen` — collects tags, app unions them onto each
+  doc via `save_document`, existing tags kept), `d` opens one count-aware
+  confirm (`soap/tui/confirm.py:ConfirmBulkDeleteScreen` → `delete_document` per
+  id), and `x` exports the selection (`soap/tui/export.py`:
+  `ExportScopeScreen`→`ExportDestinationScreen`; also in the `^p` palette). A bulk
+  `t`/`d` consumes the selection (`clear_marks` on success), reports outcome +
+  failures, and never touches the DB directly. With nothing marked, `t`/`d` keep
+  the single-document behavior. `u` (`action_clear_selection`) quietly unselects
+  all (no-op when empty); it lives in the `?` reference + `^p` palette,
+  deliberately NOT on the footer, and is safe next to search because a focused
+  `Input` consumes the keypress. The persistent footer (`_cheatbar`) is reduced to
+  select/edit/tag/read/export/pane/`?`; the full reference (`?`) and palette
+  (`^p`) stay discoverable off the bar. Coverage: `tests/test_tui_bulk_actions.py`.
+- **Export destination resolution is one shared function.**
+  `soap/tui/export.py:resolve_export_path(raw, cwd)` (relative→`cwd` = the launch
+  directory, not the library; `~` expanded; `.bib` added only when no suffix)
+  backs both the modal's live `saves to …` preview and its dismissed value, so
+  `ExportDestinationScreen` returns the fully resolved absolute path and the app
+  writes it verbatim — no second, drift-prone resolution. Coverage:
+  `tests/test_tui_export.py`.
 - **`always_review: true`** is the shipped default (`soap/cli/init.py`), so the review
   queue is the primary add path — weight review UX accordingly.
 - **TUI is view-only over theme tokens.** The "Aqua Slate" redesign lives entirely in

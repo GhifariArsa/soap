@@ -188,12 +188,33 @@ in-app reference; the compact map for the main screen is below.
  d                    delete the selected document and its files (asks to confirm)
  t                    edit tags (Enter/comma adds · Tab completes · Ctrl-S saves · Esc cancels)
  m                    cycle read status: unread → reading → read
+ space                mark / unmark the row for a bulk action (e.g. export)
+ x                    export to BibTeX (choose scope: selected / filtered / all)
  r                    review the inbox
  Ctrl-R               refresh from disk
  ? / Ctrl-P           keyboard reference / command palette
  Ctrl-T               cycle themes
  q                    quit
 ```
+
+### Exporting to BibTeX
+
+Press `space` to mark rows in the list (the marker replaces the status glyph),
+then `x` to export — or `x` with nothing marked. Export always asks for an
+explicit scope rather than silently dumping the whole library:
+
+- **selected** — the rows you marked (offered only when something is marked)
+- **filtered** — the documents currently shown (honors the active sidebar filter
+  and `/` search)
+- **all** — every record in the library
+
+You then enter a destination path (a missing extension defaults to `.bib`). soap
+writes a deterministic `.bib` file — entries ordered by citekey, values safely
+escaped — using each document's citekey as the entry key and its metadata for the
+fields. The export only reads the library: it never mutates anything or touches
+the network, and it reports how many records were written (and any skipped for
+incomplete metadata). The same action is reachable from the `Ctrl-P` command
+palette as **Export BibTeX**.
 
 ## How the workflow fits together
 

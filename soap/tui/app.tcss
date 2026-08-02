@@ -178,12 +178,13 @@ DataTable > .datatable--odd-row {
 
 /* --- modals: review, help, empty-library ------------------------------ */
 
-ReviewScreen, HelpScreen, TagEditScreen {
+ReviewScreen, HelpScreen, TagEditScreen, ExportScopeScreen, ExportDestinationScreen {
     align: center middle;
     background: $background 70%;
 }
 
-#review-card, #help-card, #empty-card, #tag-card, #edit-card, #confirm-card {
+#review-card, #help-card, #empty-card, #tag-card, #edit-card, #confirm-card,
+#export-card, #export-dest-card {
     width: 74;
     max-width: 90%;
     height: auto;
@@ -254,6 +255,18 @@ ReviewScreen, HelpScreen, TagEditScreen {
     color: $text-muted;
 }
 #review-hint {
+    height: auto;
+    margin: 1 0 0 0;
+    border-top: solid $border;
+    padding: 1 0 0 0;
+}
+
+/* --- BibTeX export ----------------------------------------------------- */
+
+#export-body, #export-dest-body {
+    height: auto;
+}
+#export-hint, #export-dest-hint {
     height: auto;
     margin: 1 0 0 0;
     border-top: solid $border;

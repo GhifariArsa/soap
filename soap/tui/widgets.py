@@ -99,6 +99,23 @@ class DocumentList(DataTable):
             *args, cursor_type="row", zebra_stripes=True, cell_padding=0, **kwargs
         )
         self._ids: list[str] = []
+        # Ids the user has marked (space) for a bulk action such as export. Kept
+        # by id so a marked row survives a refresh/re-sort; ids that leave the
+        # library are pruned in ``populate``.
+        self.marked: set[str] = set()
+
+    def toggle_mark(self, doc_id: str | None) -> bool | None:
+        """Toggle ``doc_id``'s marked state; return the new state (or ``None``)."""
+        if not doc_id:
+            return None
+        if doc_id in self.marked:
+            self.marked.discard(doc_id)
+            return False
+        self.marked.add(doc_id)
+        return True
+
+    def clear_marks(self) -> None:
+        self.marked.clear()
 
     # Fixed non-title column widths; Title flexes to fill the rest. cell_padding
     # is 0 (see __init__) so a 1-col gutter is baked into each cell's text; that
@@ -145,24 +162,35 @@ class DocumentList(DataTable):
     def populate(self, rows: list[DocumentRow], selected_id: str | None = None) -> None:
         self.clear()
         self._ids = []
+        # Drop marks for documents no longer present so a mark never lingers on a
+        # deleted/filtered-away id.
+        present = {row.id for row in rows}
+        self.marked &= present
         muted = self._color("text-muted")
         fg = self._color("foreground")
         year_c = self._color("secondary")
+        accent = self._color("accent")
         for row in rows:
-            glyph, gtoken = _GLYPH.get(
-                row.review_status
-                if row.review_status == ReviewStatus.NEEDS_REVIEW.value
-                else row.read_status,
-                _GLYPH["unread"],
-            )
-            gtxt = Text(glyph, style=self._color(gtoken))
+            marked = row.id in self.marked
+            # A marked row swaps its status glyph for a filled accent marker so
+            # the selection is legible without stealing a column.
+            if marked:
+                gtxt = Text("▣", style=accent)
+            else:
+                glyph, gtoken = _GLYPH.get(
+                    row.review_status
+                    if row.review_status == ReviewStatus.NEEDS_REVIEW.value
+                    else row.read_status,
+                    _GLYPH["unread"],
+                )
+                gtxt = Text(glyph, style=self._color(gtoken))
             attention = (
                 row.review_status == ReviewStatus.NEEDS_REVIEW.value
                 or row.read_status == ReadStatus.UNREAD.value
             )
             ttxt = Text(
                 " " + (row.title or "—"),
-                style=(f"bold {fg}" if attention else muted),
+                style=(accent if marked else (f"bold {fg}" if attention else muted)),
                 no_wrap=True,
                 overflow="ellipsis",
             )

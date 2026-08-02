@@ -18,8 +18,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from soap.bibtex import serialize_documents
+
 from textual import on
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
 from textual.containers import Center, Horizontal, Middle
 from textual.screen import ModalScreen
@@ -38,6 +40,7 @@ from soap.models.document import ReadStatus
 from soap.tui._markup import key, sep
 from soap.tui.confirm import ConfirmDeleteScreen
 from soap.tui.edit import EditScreen
+from soap.tui.export import ExportDestinationScreen, ExportScopeScreen
 from soap.tui.review import ReviewScreen
 from soap.tui.tags import TagEditScreen
 from soap.tui.themes import BUNDLED_THEMES, DEFAULT_THEME, load_user_themes
@@ -66,7 +69,9 @@ def _cheatbar(inbox: int) -> str:
             key("t", "tags"),
             key("E", "edit"),
             key("d", "del"),
-            key("m", "mark"),
+            key("m", "read"),
+            key("space", "select"),
+            key("x", "export"),
             review,
             key("tab", "pane"),
             key("?", "keys"),
@@ -128,6 +133,8 @@ class HelpScreen(ModalScreen[None]):
                 ("e", "edit YAML ($EDITOR)"),
                 ("d", "delete document"),
                 ("m", "cycle read status"),
+                ("space", "mark / unmark"),
+                ("x", "export BibTeX"),
                 ("r", "review inbox"),
             ],
         ),
@@ -197,6 +204,8 @@ class SoapApp(App):
         Binding("E", "edit_fields", "edit fields", show=False),
         Binding("d", "delete", "delete", show=False),
         Binding("m", "cycle_read_status", "cycle read status", show=False),
+        Binding("space", "toggle_mark", "mark", show=False),
+        Binding("x", "export", "export BibTeX", show=False),
         Binding("question_mark", "help", "help", show=False, key_display="?"),
         Binding("tab", "focus_pane(1)", "Next pane", show=False),
         Binding("shift+tab", "focus_pane(-1)", "Prev pane", show=False),
@@ -568,6 +577,106 @@ class SoapApp(App):
         # chips reflect the new set (the cursor position is preserved).
         self.refresh_data()
         self._show_detail(doc_id)
+
+    def action_toggle_mark(self) -> None:
+        """Mark/unmark the current row for a bulk action (e.g. export)."""
+        doclist = self.query_one(DocumentList)
+        doc_id = doclist.current_id
+        if doc_id is None:
+            return
+        state = doclist.toggle_mark(doc_id)
+        if state is None:
+            return
+        # Re-render the row's marker and keep the cursor where it was, then step
+        # down so space-space-space marks a run — matching mc/ranger muscle memory.
+        row = doclist.cursor_row
+        self._populate_list(selected_id=doc_id)
+        n = len(doclist.marked)
+        if row + 1 < doclist.row_count:
+            doclist.move_cursor(row=row + 1)
+        self.notify(f"{n} selected" if n else "selection cleared")
+
+    def action_export(self) -> None:
+        """Export library records to a BibTeX file, after a scope + destination choice."""
+        if self.docs is None:
+            return
+        doclist = self.query_one(DocumentList)
+        selected = len(doclist.marked)
+        filtered = len(doclist._ids)
+        total = self.docs.library_counts()["all"]
+        self.push_screen(
+            ExportScopeScreen(
+                selected_count=selected,
+                filtered_count=filtered,
+                all_count=total,
+            ),
+            self._after_export_scope,
+        )
+
+    def _after_export_scope(self, scope: str | None) -> None:
+        if scope is None or self.docs is None:
+            return
+        ids = self._ids_for_scope(scope)
+        if not ids:
+            self.notify("nothing to export", severity="warning")
+            return
+        default = "soap-selected.bib" if scope == "selected" else "soap-library.bib"
+        self.push_screen(
+            ExportDestinationScreen(count=len(ids), default_path=default),
+            lambda path: self._after_export_destination(ids, path),
+        )
+
+    def _ids_for_scope(self, scope: str) -> list[str]:
+        """Resolve a scope choice to the concrete document ids to export."""
+        doclist = self.query_one(DocumentList)
+        if scope == "selected":
+            # Preserve the current list order for the marked subset.
+            return [i for i in doclist._ids if i in doclist.marked]
+        if scope == "filtered":
+            return list(doclist._ids)
+        # "all" — every library record, independent of the active filter.
+        if self.docs is None:
+            return []
+        return [r.id for r in self.docs.list_documents(filter_kind="all")]
+
+    def _after_export_destination(self, ids: list[str], path: str | None) -> None:
+        if path is None or self.docs is None:
+            return
+        # Hydrate the chosen documents read-only through the service layer; export
+        # never mutates the library or touches the network.
+        docs = [self.docs.get_document(i) for i in ids]
+        documents = [d for d in docs if d is not None]
+        result = serialize_documents(documents)
+        target = Path(path).expanduser()
+        if target.suffix == "":
+            target = target.with_suffix(".bib")
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(result.text, encoding="utf-8")
+        except OSError as exc:
+            self.notify(f"could not write {target}: {exc}", severity="error", timeout=8)
+            return
+        n = result.count
+        msg = f"exported {n} record{'s' if n != 1 else ''} → {target}"
+        skipped = len(result.skipped_ids)
+        if skipped:
+            self.notify(
+                f"{msg} · {skipped} skipped (incomplete metadata)",
+                severity="warning",
+                timeout=8,
+            )
+        else:
+            self.notify(msg)
+
+    def get_system_commands(self, screen):
+        """Surface the export action in the ``ctrl+p`` command palette too."""
+        yield from super().get_system_commands(screen)
+        if self._initialized:
+            yield SystemCommand(
+                "Export BibTeX",
+                "Export selected, filtered, or all records to a .bib file",
+                self.action_export,
+            )
 
     def action_help(self) -> None:
         self.push_screen(HelpScreen())

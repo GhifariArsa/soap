@@ -68,6 +68,18 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `e` stays the full-YAML `$EDITOR` power option. Both go through the library helpers
   (never the DB); delete is confirm-gated. Pilot coverage:
   `tests/test_tui_browser_edit_delete.py`.
+- **BibTeX export is read-only and pure.** `soap/bibtex.py` serializes
+  `Document`s to a deterministic `.bib` (entries ordered by citekey, entry key =
+  `id`, `type`→BibTeX type via `_TYPE_MAP` fallback `misc`, `venue`→`journal` or
+  `booktitle` by type, char-by-char LaTeX escaping — never sequential
+  `str.replace`, which re-escapes inserted braces). `serialize_documents` returns
+  a `BibtexResult` partitioning inputs into `exported_ids`/`skipped_ids` so
+  callers report drops instead of silently losing records. The TUI wires it via
+  `space` (mark rows on `DocumentList.marked`) + `x` (`soap/tui/export.py`:
+  `ExportScopeScreen`→`ExportDestinationScreen`; also in the `^p` palette). The
+  app hydrates chosen docs through `DocumentService.get_document` and writes the
+  file — it never mutates the library or hits the network. Coverage:
+  `tests/test_bibtex.py` + `tests/test_tui_export.py`.
 - **`always_review: true`** is the shipped default (`soap/cli/init.py`), so the review
   queue is the primary add path — weight review UX accordingly.
 - **TUI is view-only over theme tokens.** The "Aqua Slate" redesign lives entirely in

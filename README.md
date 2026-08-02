@@ -185,10 +185,10 @@ in-app reference; the compact map for the main screen is below.
  /                    search title, author, tag, or DOI (Enter/Tab → list)
  E                    edit the core fields (title/authors/year/type/venue) in an in-app form
  e                    edit the complete `info.yaml` in $EDITOR (full power option)
- d                    delete the selected document and its files (asks to confirm)
- t                    edit tags (Enter/comma adds · Tab completes · Ctrl-S saves · Esc cancels)
+ d                    delete — the marked documents in bulk (one confirm), or the single row
+ t                    tag — additive bulk-tag across the selection, or the single-document editor
  m                    cycle read status: unread → reading → read
- space                mark / unmark the row for a bulk action (e.g. export)
+ space                mark / unmark the row; marks drive t / d / x on the whole selection
  x                    export to BibTeX (choose scope: selected / filtered / all)
  r                    review the inbox
  Ctrl-R               refresh from disk
@@ -197,11 +197,26 @@ in-app reference; the compact map for the main screen is below.
  q                    quit
 ```
 
+### Working with a selection
+
+Press `space` to mark rows (the marker replaces the status glyph; marking stays
+quiet so you can rattle down a run). Marks turn the single-document actions into
+bulk ones:
+
+- `t` — add tags to every marked document at once (additive: existing tags stay)
+- `d` — delete every marked document and its files after one count-aware confirm
+- `x` — export the marked documents to BibTeX
+
+With nothing marked, `t`/`d` act on the single row under the cursor exactly as
+before. A bulk `t`/`d` consumes the selection (it clears once the action
+completes); cancelling a confirm leaves both the documents and the selection
+untouched.
+
 ### Exporting to BibTeX
 
-Press `space` to mark rows in the list (the marker replaces the status glyph),
-then `x` to export — or `x` with nothing marked. Export always asks for an
-explicit scope rather than silently dumping the whole library:
+Press `space` to mark rows, then `x` to export — or `x` with nothing marked.
+Export always asks for an explicit scope rather than silently dumping the whole
+library:
 
 - **selected** — the rows you marked (offered only when something is marked)
 - **filtered** — the documents currently shown (honors the active sidebar filter

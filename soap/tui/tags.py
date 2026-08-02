@@ -245,3 +245,152 @@ class TagEditScreen(ModalScreen[list[str] | None]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+
+class BulkTagScreen(ModalScreen[list[str] | None]):
+    """Collect tags to *add* to every marked document, additively.
+
+    Shares the single-document editor's keyboard-first entry (type + ``enter`` /
+    ``,`` to add a chip, ``tab`` to complete the top library suggestion, empty
+    ``backspace`` to drop the last chip). Unlike :class:`TagEditScreen` it edits no
+    single document: the working set starts empty and represents tags to *union*
+    onto each selected document, so existing tags are never removed. It persists
+    nothing itself — it dismisses with the entered tag list (``None`` if cancelled
+    or empty) and the app applies them per document through ``save_document``
+    (disk-first, never the DB).
+    """
+
+    AUTO_FOCUS = "#tag-input"
+
+    BINDINGS = [
+        Binding("ctrl+s", "save", "save", show=True),
+        Binding("escape", "cancel", "cancel", show=False),
+    ]
+
+    def __init__(self, docs: DocumentService, count: int) -> None:
+        super().__init__()
+        self.docs = docs
+        self.count = count
+        self.tags: list[str] = []
+        self.vocab: list[str] = [name for name, _ in docs.tag_counts()]
+
+    def compose(self) -> ComposeResult:
+        with Middle():
+            with Center():
+                with Vertical(id="tag-card"):
+                    yield Static("", id="tag-chips")
+                    yield TagInput(
+                        id="tag-input",
+                        placeholder="type a tag to add — enter to add, tab to complete",
+                    )
+                    yield Static("", id="tag-suggest")
+                    yield Static(_LEGEND, id="tag-hint")
+
+    def on_mount(self) -> None:
+        n = self.count
+        self.query_one("#tag-card").border_title = (
+            f"#  ADD TAGS · {n} document{'s' if n != 1 else ''}"
+        )
+        self._render_chips()
+        self._render_suggestions()
+
+    # -- rendering (mirrors TagEditScreen) ---------------------------------
+
+    def _render_chips(self) -> None:
+        chips = self.query_one("#tag-chips", Static)
+        if self.tags:
+            chips.update(
+                sep(2).join(
+                    f"[$text-primary on $primary-muted] #{escape(t)} [/]"
+                    for t in self.tags
+                )
+            )
+        else:
+            chips.update("[$text-muted]tags added here apply to every selected document[/]")
+
+    def _partial(self) -> str:
+        raw = self.query_one("#tag-input", Input).value
+        parts = re.split(r"[,\s]+", raw)
+        return _norm(parts[-1]) if parts else ""
+
+    def _matches(self) -> list[str]:
+        partial = self._partial()
+        pool = [t for t in self.vocab if t not in self.tags]
+        if not partial:
+            return pool[:_MAX_SUGGEST]
+        prefix = [t for t in pool if t.startswith(partial)]
+        substr = [t for t in pool if partial in t and not t.startswith(partial)]
+        return (prefix + substr)[:_MAX_SUGGEST]
+
+    def _render_suggestions(self) -> None:
+        suggest = self.query_one("#tag-suggest", Static)
+        matches = self._matches()
+        if not matches:
+            suggest.update("[$text-muted]no matching tags[/]")
+            return
+        parts = [f"[$background on $primary] {escape(matches[0])} [/]"]
+        parts += [f"[$text-muted on $surface] {escape(m)} [/]" for m in matches[1:]]
+        suggest.update(sep(1).join(parts))
+
+    # -- mutation ----------------------------------------------------------
+
+    def _add(self, tag: str) -> None:
+        n = _norm(tag)
+        if n and n not in self.tags:
+            self.tags.append(n)
+
+    def _commit_input(self) -> None:
+        box = self.query_one("#tag-input", Input)
+        for token in _split(box.value):
+            self._add(token)
+        box.value = ""
+
+    # -- events ------------------------------------------------------------
+
+    @on(Input.Changed, "#tag-input")
+    def _input_changed(self, event: Input.Changed) -> None:
+        if event.value and event.value[-1] in ", ":
+            head = event.value[:-1]
+            if head.strip():
+                for token in _split(head):
+                    self._add(token)
+                self.query_one("#tag-input", Input).value = ""
+                self._render_chips()
+        self._render_suggestions()
+
+    @on(Input.Submitted, "#tag-input")
+    def _input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()
+        self._commit_input()
+        self._render_chips()
+        self._render_suggestions()
+
+    @on(TagInput.Complete)
+    def _complete(self, event: TagInput.Complete) -> None:
+        matches = self._matches()
+        if not matches:
+            return
+        self._add(matches[0])
+        self.query_one("#tag-input", Input).value = ""
+        self._render_chips()
+        self._render_suggestions()
+
+    @on(TagInput.DropLast)
+    def _drop_last(self, event: TagInput.DropLast) -> None:
+        if self.tags:
+            self.tags.pop()
+            self._render_chips()
+            self._render_suggestions()
+
+    # -- actions -----------------------------------------------------------
+
+    def action_save(self) -> None:
+        self._commit_input()
+        if not self.tags:
+            # Nothing entered — treat as cancel so no document is rewritten.
+            self.dismiss(None)
+            return
+        self.dismiss(list(self.tags))
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)

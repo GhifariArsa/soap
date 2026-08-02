@@ -34,15 +34,16 @@ from soap.library import (
     delete_document,
     edit_document,
     resolve_file_ref_path,
+    save_document,
     set_read_status,
 )
-from soap.models.document import ReadStatus
+from soap.models.document import Document, ReadStatus
 from soap.tui._markup import key, sep
-from soap.tui.confirm import ConfirmDeleteScreen
+from soap.tui.confirm import ConfirmBulkDeleteScreen, ConfirmDeleteScreen
 from soap.tui.edit import EditScreen
 from soap.tui.export import ExportDestinationScreen, ExportScopeScreen
 from soap.tui.review import ReviewScreen
-from soap.tui.tags import TagEditScreen
+from soap.tui.tags import BulkTagScreen, TagEditScreen
 from soap.tui.themes import BUNDLED_THEMES, DEFAULT_THEME, load_user_themes
 from soap.tui.widgets import DetailPane, DocumentList, Sidebar, SidebarRow
 
@@ -55,28 +56,23 @@ _FILTER_TITLES = {
 }
 
 
-def _cheatbar(inbox: int) -> str:
-    """The persistent footer: wired verbs only, keys teal, review count amber."""
-    review = (
-        key("r", "review", "$accent")
-        + (sep(1) + f"[b $accent]{inbox}[/]" if inbox else "")
-    )
+def _cheatbar() -> str:
+    """The persistent footer: a compact set of the core bulk-first concepts.
+
+    Deliberately reduced to seven concepts — the full key reference (``?``) and
+    the command palette (``^p``) stay discoverable but off the bar. Export appears
+    exactly once. ``space`` selects rows so ``E``/``t``/``m``/``x`` then act on the
+    selection (or the single row under the cursor when nothing is marked).
+    """
     return sep(3).join(
         [
-            key("j/k", "move"),
-            key("enter", "open"),
-            key("/", "find"),
-            key("t", "tags"),
-            key("E", "edit"),
-            key("d", "del"),
-            key("m", "read"),
             key("space", "select"),
+            key("E", "edit"),
+            key("t", "tag"),
+            key("m", "read"),
             key("x", "export"),
-            review,
             key("tab", "pane"),
             key("?", "keys"),
-            key("^p", "palette"),
-            key("q", "quit"),
         ]
     )
 
@@ -331,7 +327,7 @@ class SoapApp(App):
             )
         else:
             pill.display = False
-        self.query_one("#cheatbar", Static).update(_cheatbar(self._inbox))
+        self.query_one("#cheatbar", Static).update(_cheatbar())
 
     def _populate_list(self, selected_id: str | None = None) -> None:
         if self.docs is None:
@@ -528,9 +524,30 @@ class SoapApp(App):
         self.notify("metadata saved")
 
     def action_delete(self) -> None:
-        """Delete the selected document and its files, after confirmation."""
-        doc_id = self.query_one(DocumentList).current_id
-        if self.docs is None or doc_id is None:
+        """Delete the marked documents (bulk) or the single cursor document.
+
+        With rows marked, one count-aware confirmation gates deleting the whole
+        selection; with nothing marked, the existing single-document delete is
+        unchanged. Cancelling makes no change in either case.
+        """
+        if self.docs is None:
+            return
+        doclist = self.query_one(DocumentList)
+        if doclist.marked:
+            ids = [i for i in doclist._ids if i in doclist.marked]
+            docs = [self.docs.get_document(i) for i in ids]
+            documents = [d for d in docs if d is not None]
+            if not documents:
+                return
+            self.push_screen(
+                ConfirmBulkDeleteScreen(documents),
+                lambda confirmed: self._after_confirm_bulk_delete(
+                    [d.id for d in documents], confirmed
+                ),
+            )
+            return
+        doc_id = doclist.current_id
+        if doc_id is None:
             return
         doc = self.docs.get_document(doc_id)
         if doc is None:
@@ -539,6 +556,35 @@ class SoapApp(App):
             ConfirmDeleteScreen(doc),
             lambda confirmed: self._after_confirm_delete(doc_id, confirmed),
         )
+
+    def _after_confirm_bulk_delete(
+        self, ids: list[str], confirmed: bool | None
+    ) -> None:
+        if not confirmed or self.docs is None:
+            return
+        deleted = 0
+        failed: list[str] = []
+        for doc_id in ids:
+            try:
+                delete_document(self.library, doc_id, self.docs)
+                deleted += 1
+            except Exception:  # noqa: BLE001 - collect, report, keep going
+                failed.append(doc_id)
+        # The selection is consumed by the bulk action; deleted ids are gone and
+        # any that failed stay in the library but the marks are cleared so the
+        # next action starts from a clean selection.
+        self.query_one(DocumentList).clear_marks()
+        self.refresh_data()
+        doclist = self.query_one(DocumentList)
+        self._show_detail(doclist.current_id)
+        if failed:
+            self.notify(
+                f"deleted {deleted}, {len(failed)} failed: {', '.join(failed)}",
+                severity="error",
+                timeout=8,
+            )
+        else:
+            self.notify(f"deleted {deleted} document{'s' if deleted != 1 else ''}")
 
     def _after_confirm_delete(self, doc_id: str, confirmed: bool | None) -> None:
         if not confirmed or self.docs is None:
@@ -556,8 +602,24 @@ class SoapApp(App):
         self.notify("document deleted")
 
     def action_edit_tags(self) -> None:
-        doc_id = self.query_one(DocumentList).current_id
-        if self.docs is None or doc_id is None:
+        """Edit tags: additive bulk-tag for the selection, or the single editor.
+
+        With rows marked, ``t`` opens the additive bulk-tag flow (entered tags are
+        unioned onto each marked document, existing tags kept). With nothing
+        marked, the single-document tag editor is unchanged.
+        """
+        if self.docs is None:
+            return
+        doclist = self.query_one(DocumentList)
+        if doclist.marked:
+            ids = [i for i in doclist._ids if i in doclist.marked]
+            self.push_screen(
+                BulkTagScreen(self.docs, len(ids)),
+                lambda tags: self._after_bulk_tag(ids, tags),
+            )
+            return
+        doc_id = doclist.current_id
+        if doc_id is None:
             return
         doc = self.docs.get_document(doc_id)
         if doc is None:
@@ -566,6 +628,44 @@ class SoapApp(App):
             TagEditScreen(self.library, self.docs, doc),
             lambda saved: self._after_tag_edit(doc_id, saved),
         )
+
+    def _after_bulk_tag(self, ids: list[str], tags: list[str] | None) -> None:
+        # None / empty = cancelled or nothing entered → no change.
+        if not tags or self.docs is None:
+            return
+        updated = 0
+        failed: list[str] = []
+        for doc_id in ids:
+            doc = self.docs.get_document(doc_id)
+            if doc is None:
+                failed.append(doc_id)
+                continue
+            # Additive union: keep existing tags, add the new ones. Model
+            # normalization (lowercase/sort/dedupe) collapses any overlap.
+            merged = sorted({*doc.tags, *tags})
+            if merged == sorted(doc.tags):
+                continue  # nothing new for this document
+            data = doc.model_dump(mode="json")
+            data["tags"] = merged
+            try:
+                save_document(self.library, Document(**data), self.docs)
+                updated += 1
+            except Exception:  # noqa: BLE001 - collect, report, keep going
+                failed.append(doc_id)
+        # The bulk action consumes the selection; refresh sidebar tag counts + list.
+        self.query_one(DocumentList).clear_marks()
+        self.refresh_data()
+        self._show_detail(self.query_one(DocumentList).current_id)
+        n = len(tags)
+        base = f"tagged {updated} document{'s' if updated != 1 else ''}"
+        if failed:
+            self.notify(
+                f"{base}, {len(failed)} failed: {', '.join(failed)}",
+                severity="error",
+                timeout=8,
+            )
+        else:
+            self.notify(f"{base} · +{n} tag{'s' if n != 1 else ''}")
 
     def _after_tag_edit(self, doc_id: str, saved: list[str] | None) -> None:
         # None = cancelled / no change; a list = the persisted tag set.
@@ -589,12 +689,12 @@ class SoapApp(App):
             return
         # Re-render the row's marker and keep the cursor where it was, then step
         # down so space-space-space marks a run — matching mc/ranger muscle memory.
+        # Marking stays quiet: the row markers are feedback enough, so a run of
+        # selections never spams a toast.
         row = doclist.cursor_row
         self._populate_list(selected_id=doc_id)
-        n = len(doclist.marked)
         if row + 1 < doclist.row_count:
             doclist.move_cursor(row=row + 1)
-        self.notify(f"{n} selected" if n else "selection cleared")
 
     def action_export(self) -> None:
         """Export library records to a BibTeX file, after a scope + destination choice."""
